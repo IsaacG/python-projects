@@ -3,6 +3,7 @@
 import os
 import socket
 import logging
+import urllib.request
 
 class Server:
 	"""IRC Server Object. Connects to a server and does the IO"""
@@ -12,7 +13,7 @@ class Server:
 		self.port = port
 		self.timeout = 600
 		self.nick = nick
-		self.callbacks = []
+		self.callbacks = {}
 
 		self.addHook ( 'PING', ( lambda s, d: s.send ( 'PONG ' + d['Server'] ) ) )
 
@@ -56,40 +57,55 @@ class Server:
 			return { 'Nick': nick, 'Identified': isIdentified, 'Ident': ident, 'Host': host }
 
 		line = line.lstrip ( ":" )
-		mComponents = line.split ( maxsplit = 3 )
-		mType = mComponents[1]
+
+		# Split on " :" with the part after being an optional message component
+		lineParts = line.split ( " :", 1 )
+		# The part before the split has info about the input
+		parts = lineParts[0].split ( )
+		if len ( lineParts ) == 2:
+			message = lineParts[1]
+
+		# If unsure, use the second part as the message type
+		mType = parts[1]
 		data = { 'Type': mType }
 
 		# The dictionary is different for every message type
-		if mComponents[0] == 'PING':
-			data = { 'Type': 'PING', 'Server': mComponents[1] }
+		if parts[0] == 'PING':
+			data = { 'Type': 'PING', 'Server': message }
 
-		elif mComponents[1] == 'PRIVMSG':
+		elif parts[1] == 'PRIVMSG':
 
-			user = parseUser ( mComponents[0] )
-			mComponents[3] = mComponents[3].lstrip ( ":" )
-
-			if mComponents[2][0] == "#":
+			if parts[2][0] == "#":
 				mType = "PUBMSG"
 			else:
 				mType = "PRIVMSG"
-			data = { 'Type': mType, 'Channel': mComponents[2], 'Message': mComponents[3], 'User': user }
+			data['User'] = parseUser( parts[0] )
+			data['Type'] = mType
+			data['Channel'] = parts[2]
+			data['Message'] = message
 
-		elif mComponents[1] == 'JOIN':
-			data = { 'Type': 'JOIN', 'Channel': mComponents[2].lstrip( ":" ), 'User': parseUser( mComponents[0] ) }
+		elif parts[1] == 'JOIN':
+			data['User'] = parseUser( parts[0] )
+			data['Channel'] = message
 
-		elif mComponents[1] == 'PART':
-			data = { 'Type': 'PART', 'Channel': mComponents[2].lstrip( ":" ), 'User': parseUser( mComponents[0] ), 'Message': mComponents[3].lstrip( ":" ) }
+		elif parts[1] == 'PART':
+			data['User'] = parseUser( parts[0] )
+			data['Channel'] = part[2]
+			data['Message'] = message
 		
 		return data
 
 	def dispatch ( self, data ):
 		"""Send the data to a user defined function to act upon it"""
-		[ callback['code']( self, data ) for callback in self.callbacks if callback['type'] == data['Type'] ]
+		if data['Type'] in self.callbacks:
+			for callback in self.callbacks[ data['Type'] ]:
+				callback( self, data )
 
 	def addHook ( self, cType, cCode ):
 		"""Set up a callback hook to specific code on a specific type of message"""
-		self.callbacks.append( { 'type': cType, 'code': cCode } )
+		if not cType in self.callbacks:
+			self.callbacks[cType] = []
+		self.callbacks[cType].append( cCode )
 
 	def readNetworkLoop ( self ):
 		"""The network read-and-dispatch loop"""
@@ -149,6 +165,12 @@ def main ():
 
 	# Start running
 	local.connect ()
+
+def getHttpTitle ( url ):
+	urllib.request.urlopen(url, timeout = 10 )
+	# Fetch the page
+	# Check HTTP code
+	# Parse the HTML and get a title
 
 if __name__ == "__main__":
 	main ()
