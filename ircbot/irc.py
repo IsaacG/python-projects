@@ -90,7 +90,7 @@ class Server:
 
 		elif parts[1] == 'PART':
 			data['User'] = parseUser( parts[0] )
-			data['Channel'] = part[2]
+			data['Channel'] = parts[2]
 			data['Message'] = message
 		
 		return data
