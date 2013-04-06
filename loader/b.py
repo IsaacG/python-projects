@@ -1,4 +1,4 @@
 #! /usr/bin/python
 
-def myFunction ():
+def myFunctio ():
 	print ( "Another one" )

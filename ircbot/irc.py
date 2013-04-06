@@ -66,7 +66,10 @@ class Server:
 			message = lineParts[1]
 
 		# If unsure, use the second part as the message type
-		mType = parts[1]
+		if len ( parts ) > 1:
+			mType = parts[1]
+		else
+			mType = ""
 		data = { 'Type': mType }
 
 		# The dictionary is different for every message type
@@ -129,9 +132,10 @@ class Server:
 					line = line.rstrip( '\r\n' )
 					line = leftover + line
 					leftover = ''
+					print ( line )
+
 					data = self.parseLine ( line )
 
-					print ( line )
 					self.dispatch ( data )
 
 				else:

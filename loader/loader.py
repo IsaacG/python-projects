@@ -15,12 +15,27 @@ import time
 functions = {}
 
 def load( name ):
-	importlib.import_module( name )
-	functions[ name ] = sys.modules[name].myFunction
+	if name in functions:
+		unload ( name )
+
+	try:
+		importlib.import_module( name )
+	except ImportError as e:
+		print( "Failed to load module {}: {} ".format( name, e.msg ) )
+		return
+
+	try:
+		functions[ name ] = sys.modules[name].myFunction
+	except AttributeError as e:
+		unload( name )
+		print( "Failed to load {} because it is missing values: {}".format( name, e ) )
+		repr( e )
 
 def unload( name ):
-	del( sys.modules[name] )
-	del( functions[ name ] )
+	if name in sys.modules:
+		del( sys.modules[name] )
+	if name in functions:
+		del( functions[ name ] )
 
 def run():
 	print( "Starting run" )
@@ -35,9 +50,7 @@ def main():
 	run()
 	unload( "a" )
 	run()
-	print( "Change the a.py code" )
-	time.sleep( 5 )
-	load( "a" )
+	load( "c" )
 	run()
 	
 if __name__ == "__main__":
