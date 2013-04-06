@@ -1,10 +1,10 @@
 #! /usr/bin/python
 
-import os
-import sys
-import socket
-import logging
 import importlib
+import os
+import re
+import socket
+import sys
 import urllib.request
 
 class Server:
@@ -20,6 +20,7 @@ class Server:
 		self.timeout = 600
 		self.nick = nick
 		self.callbacks = {}
+		self._nickMask = re.compile ( '.+!.+@.+' )
 
 		# This one hook is integral to the workings of IRC so it's seperate
 		self.addHook ( 'PING', 'PING', ( lambda s, d: s.send ( 'PONG ' + d['Server'] ) ) )
@@ -38,14 +39,17 @@ class Server:
 
 		def parseUser ( fullMask ):
 			"""Split the user mask into components"""
-			nick, mask = fullMask.split ( '!', 1 )
-			if mask[0] == '~':
-				isIdentified = True
-				mask = mask.lstrip( "~" )
+			if self._nickMask.match ( fullMask ):
+				nick, mask = fullMask.split ( '!', 1 )
+				if mask[0] == '~':
+					isIdentified = True
+					mask = mask.lstrip( "~" )
+				else:
+					isIdentified = False
+				ident, host = mask.split ( "@", 1 )
+				return { 'Nick': nick, 'Identified': isIdentified, 'Ident': ident, 'Host': host }
 			else:
-				isIdentified = False
-			ident, host = mask.split ( "@", 1 )
-			return { 'Nick': nick, 'Identified': isIdentified, 'Ident': ident, 'Host': host }
+				return { 'Nick': fullMask, 'Identified': False, 'Ident': "", 'Host': "" }
 
 		line = line.lstrip ( ":" )
 
@@ -222,10 +226,11 @@ class Server:
 
 def main ():
 	"""Run the IRC bot"""
-	logging.basicConfig( level = logging.DEBUG )
-
 	# Create a Server object
-	local = Server ( 'localhost', 6668, 'bot' )
+	if len ( sys.argv ) == 4:
+		local = Server ( sys.argv[1], int ( sys.argv[2] ), sys.argv[3] )
+	else:
+		local = Server ( 'localhost', 6668, 'bot' )
 
 	local.addBasicCommands()
 
