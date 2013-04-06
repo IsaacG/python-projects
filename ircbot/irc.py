@@ -10,6 +10,10 @@ import urllib.request
 class Server:
 	"""IRC Server Object. Connects to a server and does the IO"""
 	
+# ------------------------------------------
+# Basic functionality
+# ------------------------------------------
+
 	def __init__ ( self, server = 'localhost' , port = 6667, nick = 'your_nick' ):
 		self.server = server
 		self.port = port
@@ -28,48 +32,6 @@ class Server:
 		self.send ( 'NICK ' + self.nick )
 		self.send ( 'USER {} * 0 :{}'.format( self.nick, self.nick ) )
 		self.readNetworkLoop ( )
-	
-	def load ( self, name ):
-		if name in sys.modules:
-			print ( name + " already loaded. Unloading it first." )
-			self.unload ( name )
-
-		try:
-			module = importlib.import_module ( name )
-		except ImportError as e:
-			print( "Failed to load module {}: {} ".format( name, e.msg ) )
-			return
-
-		try:
-			for cType in module.types:
-				self.addHook ( module.name, cType, module.hookCode )
-		except AttributeError as e:
-			self.unload ( module.name )
-			print ( "Failed to load {} because it is missing values: {}".format( name, e ) )
-
-		print ( "Loaded module {} with {} hooks [{}]".format ( name, len ( module.types ), ", ".join ( module.types ) ) )
-
-
-	def unload ( self, name ):
-		if name in sys.modules:
-			del ( sys.modules[name] )
-		self.delHook ( name )
-
-	def send ( self, line ):
-		"""Wrapper to send raw text"""
-		if not self.conn:
-			raise Exception ( 'Not connected to a server' )
-			return
-		line = line + '\r\n'
-		self.conn.sendall ( line.encode() )
-
-	def dMsg ( self, destination, message ):
-		"""Send a PRIVMSG"""
-		self.send ( 'PRIVMSG {} :{}'.format( destination, message ) )
-	
-	def dJoin ( self, channel ):
-		"""Join a channel"""
-		self.send ( 'JOIN :' + channel )
 
 	def parseLine ( self, line ):
 		"""The IRC input parser; turn a raw IRC line into a dict of data"""
@@ -131,23 +93,6 @@ class Server:
 		
 		return data
 
-	def dispatch ( self, data ):
-		"""Send the data to a user defined function to act upon it"""
-		if data['Type'] in self.callbacks:
-			for callback in self.callbacks[ data['Type'] ].values():
-				callback( self, data )
-
-	def addHook ( self, cName, cType, cCode ):
-		"""Set up a callback hook to specific code on a specific type of message"""
-		if not cType in self.callbacks:
-			self.callbacks[ cType ] = {}
-		self.callbacks[ cType ][ cName ] = cCode
-
-	def delHook ( self, name ):
-		for cType in self.callbacks:
-			if name in self.callbacks[ cType ]:
-				del ( self.callbacks[ cType ][ name ] )
-
 	def readNetworkLoop ( self ):
 		"""The network read-and-dispatch loop"""
 
@@ -179,45 +124,116 @@ class Server:
 				else:
 					leftover = line
 
+# ------------------------------------------
+# IRC wrappers and helpers
+# ------------------------------------------
+
+	def join ( self, channel ):
+		"""Join a channel"""
+		self.send ( 'JOIN :' + channel )
+
+	def msg ( self, destination, message ):
+		"""Send a PRIVMSG"""
+		self.send ( 'PRIVMSG {} :{}'.format( destination, message ) )
+	
+	def send ( self, line ):
+		"""Wrapper to send raw text"""
+		if not self.conn:
+			raise Exception ( 'Not connected to a server' )
+			return
+		line = line + '\r\n'
+		self.conn.sendall ( line.encode() )
+
+# ------------------------------------------
+# Extentability
+# ------------------------------------------
+	
+	def addBasicCommands ( self ):
+		# Define some basic commands to give the bot some behaviour
+		def sayCommand ( server, data ):
+			parts = data['Message'].split( maxsplit = 2 )
+			if len ( parts ) == 3 and parts[0] == "say":
+				server.msg( parts[1], parts[2] )
+
+		def loadCommand ( server, data ):
+			parts = data['Message'].split()
+			if len ( parts ) == 2 and parts[0] == "load":
+				server.load ( parts[1] )
+			elif len ( parts ) == 2 and parts[0] == "unload":
+				server.unload ( parts[1] )
+
+		def joinCommand ( server, data ):
+			parts = data['Message'].split()
+			if len ( parts ) == 2 and parts[0] == "join" and (parts[1])[0] == "#":
+				server.join ( parts[1] )
+
+		def quitCommand ( server, data ):
+			if data['Message'] == 'quiT':
+				sys.exit()
+
+		# Associate commands with event types
+		self.addHook ( 'Join', 'PRIVMSG', joinCommand )
+		self.addHook ( 'Say', 'PRIVMSG', sayCommand )
+		self.addHook ( 'Load', 'PRIVMSG', loadCommand )
+		self.addHook ( 'Quit', 'PRIVMSG', quitCommand )
+
+	def addHook ( self, cName, cType, cCode ):
+		"""Set up a callback hook to specific code on a specific type of message"""
+		if not cType in self.callbacks:
+			self.callbacks[ cType ] = {}
+		self.callbacks[ cType ][ cName ] = cCode
+
+	def delHook ( self, name ):
+		for cType in self.callbacks:
+			if name in self.callbacks[ cType ]:
+				del ( self.callbacks[ cType ][ name ] )
+
+	def dispatch ( self, data ):
+		"""Send the data to a user defined function to act upon it"""
+		if data['Type'] in self.callbacks:
+			for callback in self.callbacks[ data['Type'] ].values():
+				callback( self, data )
+
+	def load ( self, name ):
+		if name in sys.modules:
+			print ( name + " already loaded. Unloading it first." )
+			self.unload ( name )
+
+		try:
+			module = importlib.import_module ( name )
+		except ImportError as e:
+			print( "Failed to load module {}: {} ".format( name, e.msg ) )
+			return
+
+		try:
+			for cType in module.types:
+				self.addHook ( module.name, cType, module.hookCode )
+		except AttributeError as e:
+			self.unload ( module.name )
+			print ( "Failed to load {} because it is missing values: {}".format( name, e ) )
+
+		print ( "Loaded module {} with {} hooks [{}]".format ( name, len ( module.types ), ", ".join ( module.types ) ) )
+
+	def unload ( self, name ):
+		if name in sys.modules:
+			del ( sys.modules[name] )
+		self.delHook ( name )
+
+
 def main ():
 	"""Run the IRC bot"""
 	logging.basicConfig( level = logging.DEBUG )
 
 	# Create a Server object
-	local = Server ( 'irc.bondage.com', 6667, 'IsaacsBitch' )
+	local = Server ( 'localhost', 6668, 'bot' )
 
-	# Define some commands to give the bot some behaviour
-	def sayCommand ( server, data ):
-		parts = data['Message'].split( maxsplit = 2 )
-		if len ( parts ) == 3 and parts[0] == "say":
-			server.dMsg( parts[1], parts[2] )
-
-	def loadCommand ( server, data ):
-		parts = data['Message'].split()
-		if len ( parts ) == 2 and parts[0] == "load":
-			server.load ( parts[1] )
-		elif len ( parts ) == 2 and parts[0] == "unload":
-			server.unload ( parts[1] )
-
-	def joinCommand ( server, data ):
-		parts = data['Message'].split()
-		if len ( parts ) == 2 and parts[0] == "join" and (parts[1])[0] == "#":
-			server.dJoin ( parts[1] )
-
-	def quitCommand ( server, data ):
-		if data['Message'] == 'quiT':
-			sys.exit()
-
-	# Associate commands with event types
-	local.addHook ( 'Join', 'PRIVMSG', joinCommand )
-	local.addHook ( 'Say', 'PRIVMSG', sayCommand )
-	local.addHook ( 'Load', 'PRIVMSG', loadCommand )
-	local.addHook ( 'Quit', 'PRIVMSG', quitCommand )
+	local.addBasicCommands()
 
 	# Start running
 	local.connect ()
 
 def getHttpTitle ( url ):
+	"""Function stub for a module I want"""
 	urllib.request.urlopen(url, timeout = 10 )
 	# Fetch the page
 	# Check HTTP code
