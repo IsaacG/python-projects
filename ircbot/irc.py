@@ -282,13 +282,6 @@ def main ():
 	# Start running
 	local.connect ()
 
-def getHttpTitle ( url ):
-	"""Function stub for a module I want"""
-	urllib.request.urlopen(url, timeout = 10 )
-	# Fetch the page
-	# Check HTTP code
-	# Parse the HTML and get a title
-
 if __name__ == "__main__":
 	main ()
 
