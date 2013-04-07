@@ -80,7 +80,16 @@ class Server:
 				data['Channel'] = parts[2]
 			else:
 				mType = "PRIVMSG"
-			data['User'] = parseUser( parts[0] )
+
+			if message[0] == '\x01':
+				data['Action'] = True
+				message = message.lstrip ( '\x01' )
+				message = message.lstrip ( 'ACTION' )
+				message = message.rstrip ( '\x01' )
+			else:
+				data['Action'] = False
+
+			data['User'] = parseUser ( parts[0] )
 			data['Type'] = mType
 			data['Message'] = message
 
@@ -134,6 +143,10 @@ class Server:
 # ------------------------------------------
 # IRC wrappers and helpers
 # ------------------------------------------
+
+	def act ( self, destination, message ):
+		"""Do an action"""
+		self.send ( 'PRIVMSG {} :\x01ACTION{}\x01'.format( destination, message ) )
 
 	def join ( self, channel ):
 		"""Join a channel"""
@@ -199,7 +212,8 @@ class Server:
 	def dispatch ( self, data ):
 		"""Send the data to a user defined function to act upon it"""
 		if data['Type'] in self.callbacks:
-			for callback in self.callbacks[ data['Type'] ].values():
+			functions = [ x for x in self.callbacks[ data['Type'] ].values() ]
+			for callback in functions:
 				callback( self, data )
 
 	def load ( self, name ):
