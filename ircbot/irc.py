@@ -119,7 +119,7 @@ class Server:
 					line = line.rstrip( '\r\n' )
 					line = leftover + line
 					leftover = ''
-					print ( line )
+					print ( line.encode('ascii', 'replace') )
 
 					data = self.parseLine ( line )
 
