@@ -119,7 +119,8 @@ class Server:
 					line = line.rstrip( '\r\n' )
 					line = leftover + line
 					leftover = ''
-					print ( line.encode('ascii', 'replace') )
+					out = "< " + line
+					print ( out.encode('ascii', 'replace') )
 
 					data = self.parseLine ( line )
 
@@ -145,6 +146,7 @@ class Server:
 		if not self.conn:
 			raise Exception ( 'Not connected to a server' )
 			return
+		print ( "> " + line )
 		line = line + '\r\n'
 		self.conn.sendall ( line.encode() )
 
@@ -200,13 +202,13 @@ class Server:
 
 	def load ( self, name ):
 		if name in sys.modules:
-			print ( name + " already loaded. Unloading it first." )
+			print ( "I " + name + " already loaded. Unloading it first." )
 			self.unload ( name )
 
 		try:
 			module = importlib.import_module ( name )
 		except ImportError as e:
-			print( "Failed to load module {}: {} ".format( name, e.msg ) )
+			print( "W " + "Failed to load module {}: {} ".format( name, e.msg ) )
 			return
 
 		try:
@@ -214,9 +216,9 @@ class Server:
 				self.addHook ( module.name, cType, module.hookCode )
 		except AttributeError as e:
 			self.unload ( module.name )
-			print ( "Failed to load {} because it is missing values: {}".format( name, e ) )
+			print ( "W " + "Failed to load {} because it is missing values: {}".format( name, e ) )
 
-		print ( "Loaded module {} with {} hooks [{}]".format ( name, len ( module.types ), ", ".join ( module.types ) ) )
+		print ( "I " + "Loaded module {} with {} hooks [{}]".format ( name, len ( module.types ), ", ".join ( module.types ) ) )
 
 	def unload ( self, name ):
 		if name in sys.modules:
