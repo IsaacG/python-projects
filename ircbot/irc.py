@@ -73,20 +73,34 @@ class Server:
 		if parts[0] == 'PING':
 			data = { 'Type': 'PING', 'Server': message }
 
+		# PRIVMSG is used for a lot of things; this gets a lot of parsing and details in the data structure
 		elif parts[1] == 'PRIVMSG':
 
+			# PRIVMSG sent to a channel is a public message; otherwise it is a private message
 			if parts[2][0] == "#":
 				mType = "PUBMSG"
 				data['Channel'] = parts[2]
 			else:
 				mType = "PRIVMSG"
 
-			if message[0] == '\x01':
-				data['Action'] = True
+			# PRIVMSG with the message wrapped in \x01 is a CTCP message
+			if message[0] == '\x01' and message[-1] == '\x01':
 				message = message.lstrip ( '\x01' )
-				message = message.lstrip ( 'ACTION' )
 				message = message.rstrip ( '\x01' )
+				data['CTCP'] = True
+				# CTCP messages got a CTCP command
+				ctcp = message.split( maxsplit = 1 )
+				data['CTCP Command'] = ctcp[0]
+				message = message.lstrip ( data['CTCP Command'] )
+				message = message.lstrip ( " " )
+
+				# CTCP ACTION commands get treated specially since they are common
+				if data['CTCP Command'] == 'ACTION':
+					data['Action'] = True
+				else:
+					data['Action'] = False
 			else:
+				data['CTCP'] = False
 				data['Action'] = False
 
 			data['User'] = parseUser ( parts[0] )
@@ -146,7 +160,15 @@ class Server:
 
 	def act ( self, destination, message ):
 		"""Do an action"""
-		self.send ( 'PRIVMSG {} :\x01ACTION{}\x01'.format( destination, message ) )
+		self.ctcp ( destination, 'ACTION', message )
+
+	def ctcp ( self, destination, command, message = None):
+		"""Send a CTCP command"""
+		command = command.upper()
+		if message == None:
+			self.send ( 'PRIVMSG {} :\x01{}\x01'.format( destination, command ) )
+		else:
+			self.send ( 'PRIVMSG {} :\x01{} {}\x01'.format( destination, command, message ) )
 
 	def join ( self, channel ):
 		"""Join a channel"""
@@ -234,7 +256,7 @@ class Server:
 			self.unload ( module.name )
 			print ( "W " + "Failed to load {} because it is missing values: {}".format( name, e ) )
 
-		print ( "I " + "Loaded module {} with {} hooks [{}]".format ( name, len ( module.types ), ", ".join ( module.types ) ) )
+		print ( "I " + "Loaded module {} with {} hook(s) [{}]".format ( name, len ( module.types ), ", ".join ( module.types ) ) )
 
 	def unload ( self, name ):
 		if name in sys.modules:
