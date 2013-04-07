@@ -5,7 +5,6 @@ import os
 import re
 import socket
 import sys
-import urllib.request
 
 class Server:
 	"""IRC Server Object. Connects to a server and does the IO"""
