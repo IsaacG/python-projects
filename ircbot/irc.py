@@ -232,10 +232,16 @@ class Server:
 
 	def dispatch ( self, data ):
 		"""Send the data to a user defined function to act upon it"""
-		if data['Type'] in self.callbacks:
-			functions = [ x for x in self.callbacks[ data['Type'] ].values() ]
-			for callback in functions:
-				callback( self, data )
+		mType = data['Type']
+		if mType in self.callbacks:
+			names = [ x for x in self.callbacks[ mType ].keys() ]
+			for name in names:
+				try:
+					self.callbacks[ mType ][ name ]( self, data )
+				except Exception as e:
+					print ( "W Callback fail for Type [{}] Module [{}]; {}".format ( mType, name, e ) )
+					print ( "I Now unloading module [{}]".format ( name ) )
+					self.unload ( name )
 
 	def load ( self, name ):
 		if name in sys.modules:
