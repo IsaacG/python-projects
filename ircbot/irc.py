@@ -59,6 +59,8 @@ class Server:
 		parts = lineParts[0].split ( )
 		if len ( lineParts ) == 2:
 			message = lineParts[1]
+		else
+			message = ""
 
 		# If unsure, use the second part as the message type
 		if len ( parts ) > 1:
