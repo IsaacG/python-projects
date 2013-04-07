@@ -195,7 +195,9 @@ class Server:
 		def sayCommand ( server, data ):
 			parts = data['Message'].split( maxsplit = 2 )
 			if len ( parts ) == 3 and parts[0] == "say":
-				server.msg( parts[1], parts[2] )
+				server.msg ( parts[1], parts[2] )
+			elif len ( parts ) == 3 and parts[0] == "act":
+				server.act ( parts[1], parts[2] )
 
 		def loadCommand ( server, data ):
 			parts = data['Message'].split()
