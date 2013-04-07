@@ -192,12 +192,10 @@ class Server:
 	
 	def addBasicCommands ( self ):
 		# Define some basic commands to give the bot some behaviour
-		def sayCommand ( server, data ):
-			parts = data['Message'].split( maxsplit = 2 )
-			if len ( parts ) == 3 and parts[0] == "say":
-				server.msg ( parts[1], parts[2] )
-			elif len ( parts ) == 3 and parts[0] == "act":
-				server.act ( parts[1], parts[2] )
+		def joinCommand ( server, data ):
+			parts = data['Message'].split()
+			if len ( parts ) == 2 and parts[0] == "join" and (parts[1])[0] == "#":
+				server.join ( parts[1] )
 
 		def loadCommand ( server, data ):
 			parts = data['Message'].split()
@@ -206,20 +204,28 @@ class Server:
 			elif len ( parts ) == 2 and parts[0] == "unload":
 				server.unload ( parts[1] )
 
-		def joinCommand ( server, data ):
+		def nickCommand ( server, data ):
 			parts = data['Message'].split()
-			if len ( parts ) == 2 and parts[0] == "join" and (parts[1])[0] == "#":
-				server.join ( parts[1] )
+			if len ( parts ) == 2 and parts[0] == "nick":
+				server.send ( "NICK :{}".format ( parts[1] ) )
 
 		def quitCommand ( server, data ):
 			if data['Message'] == 'quiT':
 				sys.exit()
 
+		def sayCommand ( server, data ):
+			parts = data['Message'].split( maxsplit = 2 )
+			if len ( parts ) == 3 and parts[0] == "say":
+				server.msg ( parts[1], parts[2] )
+			elif len ( parts ) == 3 and parts[0] == "act":
+				server.act ( parts[1], parts[2] )
+
 		# Associate commands with event types
-		self.addHook ( 'Join', 'PRIVMSG', joinCommand )
-		self.addHook ( 'Say', 'PRIVMSG', sayCommand )
-		self.addHook ( 'Load', 'PRIVMSG', loadCommand )
-		self.addHook ( 'Quit', 'PRIVMSG', quitCommand )
+		self.addHook ( '_Join', 'PRIVMSG', joinCommand )
+		self.addHook ( '_Load', 'PRIVMSG', loadCommand )
+		self.addHook ( '_Nick', 'PRIVMSG', nickCommand )
+		self.addHook ( '_Quit', 'PRIVMSG', quitCommand )
+		self.addHook ( '_Say', 'PRIVMSG', sayCommand )
 
 	def addHook ( self, cName, cType, cCode ):
 		"""Set up a callback hook to specific code on a specific type of message"""
@@ -236,7 +242,7 @@ class Server:
 		"""Send the data to a user defined function to act upon it"""
 		mType = data['Type']
 		if mType in self.callbacks:
-			names = [ x for x in self.callbacks[ mType ].keys() ]
+			names = [ x for x in self.callbacks[ mType ] ]
 			for name in names:
 				try:
 					self.callbacks[ mType ][ name ]( self, data )
@@ -266,6 +272,9 @@ class Server:
 		print ( "I " + "Loaded module {} with {} hook(s) [{}]".format ( name, len ( module.types ), ", ".join ( module.types ) ) )
 
 	def unload ( self, name ):
+		# Don't unload marked (eg core) hooks
+		if name[0] == '_':
+			return
 		if name in sys.modules:
 			del ( sys.modules[name] )
 		self.delHook ( name )
