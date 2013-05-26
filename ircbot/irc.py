@@ -19,10 +19,11 @@ class Server:
 		self.timeout = 600
 		self.nick = nick
 		self.callbacks = {}
+		self.callbackData = {}
 		self._nickMask = re.compile ( '.+!.+@.+' )
 
 		# This one hook is integral to the workings of IRC so it's seperate
-		self.addHook ( 'PING', 'PING', ( lambda s, d: s.send ( 'PONG ' + d['Server'] ) ) )
+		self.addHook ( 'PING', 'PING', ( lambda s, d, n: s.send ( 'PONG ' + d['Server'] ) ) )
 
 	def connect ( self ):
 		"""Connect to the IRC network and do the handshake then start spin reading input"""
@@ -144,7 +145,10 @@ class Server:
 					line = leftover + line
 					leftover = ''
 					out = "< " + line
-					print ( out.encode('ascii', 'replace') )
+					try:
+						print ( out.encode('ascii', 'replace') )
+					except UnicodeDecodeError as e:
+						print ( out.encode() )
 
 					data = self.parseLine ( line )
 
@@ -192,28 +196,28 @@ class Server:
 	
 	def addBasicCommands ( self ):
 		# Define some basic commands to give the bot some behaviour
-		def joinCommand ( server, data ):
+		def joinCommand ( server, data, storage ):
 			parts = data['Message'].split()
 			if len ( parts ) == 2 and parts[0] == "join" and (parts[1])[0] == "#":
 				server.join ( parts[1] )
 
-		def loadCommand ( server, data ):
+		def loadCommand ( server, data, storage ):
 			parts = data['Message'].split()
 			if len ( parts ) == 2 and parts[0] == "load":
 				server.load ( parts[1] )
 			elif len ( parts ) == 2 and parts[0] == "unload":
 				server.unload ( parts[1] )
 
-		def nickCommand ( server, data ):
+		def nickCommand ( server, data, storage ):
 			parts = data['Message'].split()
 			if len ( parts ) == 2 and parts[0] == "nick":
 				server.send ( "NICK :{}".format ( parts[1] ) )
 
-		def quitCommand ( server, data ):
+		def quitCommand ( server, data, storage ):
 			if data['Message'] == 'quiT':
 				sys.exit()
 
-		def sayCommand ( server, data ):
+		def sayCommand ( server, data, storage ):
 			parts = data['Message'].split( maxsplit = 2 )
 			if len ( parts ) == 3 and parts[0] == "say":
 				server.msg ( parts[1], parts[2] )
@@ -233,6 +237,11 @@ class Server:
 			self.callbacks[ cType ] = {}
 		self.callbacks[ cType ][ cName ] = cCode
 
+		# Add data storage for the callback
+		if cName not in self.callbackData:
+			self.callbackData[ cName ] = {}
+
+
 	def delHook ( self, name ):
 		for cType in self.callbacks:
 			if name in self.callbacks[ cType ]:
@@ -245,7 +254,7 @@ class Server:
 			names = [ x for x in self.callbacks[ mType ] ]
 			for name in names:
 				try:
-					self.callbacks[ mType ][ name ]( self, data )
+					self.callbacks[ mType ][ name ]( self, data, self.callbackData[ name ] )
 				except Exception as e:
 					print ( "W Callback fail for Type [{}] Module [{}]; {}".format ( mType, name, e ) )
 					print ( "I Now unloading module [{}]".format ( name ) )
@@ -279,14 +288,20 @@ class Server:
 			del ( sys.modules[name] )
 		self.delHook ( name )
 
+		if name in self.callbackData:
+			del ( self.callbackData[ name ] )
+
 
 def main ():
 	"""Run the IRC bot"""
 	# Create a Server object
 	if len ( sys.argv ) == 4:
 		local = Server ( sys.argv[1], int ( sys.argv[2] ), sys.argv[3] )
-	else:
+	elif len ( sys.argv ) == 2 and sys.argv[1] == "-t":
 		local = Server ( 'localhost', 6668, 'bot' )
+	else:
+		print ( "Usage: " + sys.argv[0] + " host port nick" )
+		sys.exit ( 1 )
 
 	local.addBasicCommands()
 
