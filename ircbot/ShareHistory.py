@@ -11,9 +11,16 @@ def hookCode ( server, data, storage ):
 		storage['Parts'] = {}
 		storage['Settings'] = { "length": 100, "channels": "" }
 	
-	channels = storage['Settings']['channels'].split( "," )
-	if len ( channels ) != 0 and data['Channel'] not in channels:
+	channel = data['Channel'].lower()
+	channels = storage['Settings']['channels'].lower().split( "," )
+	if len ( storage['Settings']['channels'] ) != 0 and channel not in channels:
 		return ()
+
+	if channel not in storage['Messages']:
+		storage['Messages'][ channel ] = []
+
+	if channel not in storage['Parts']:
+		storage['Parts'][ channel ] = {}
 
 	class HistoryData:
 		"""Deal with history storage and retrieval"""
