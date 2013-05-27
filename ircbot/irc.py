@@ -113,7 +113,10 @@ class Server:
 
 		elif parts[1] == 'JOIN':
 			data['User'] = parseUser( parts[0] )
-			data['Channel'] = message
+			if len ( parts ) > 2:
+				data['Channel'] = parts[2]
+			else:
+				data['Channel'] = message
 
 		elif parts[1] == 'PART':
 			data['User'] = parseUser( parts[0] )
