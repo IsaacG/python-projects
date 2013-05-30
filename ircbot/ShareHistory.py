@@ -8,16 +8,17 @@ def init ( server, storage ):
 
 
 def hookCode ( server, data, storage ):
-	channel = data['Channel'].lower()
-	channels = storage['Settings']['channels'].lower().split( "," )
-	if len ( storage['Settings']['channels'] ) != 0 and channel not in channels:
-		return ()
+	if 'Channel' in data: # ie not on QUIT
+		channel = data['Channel']
+		channels = storage['Settings']['channels'].split( "," )
+		if len ( storage['Settings']['channels'] ) != 0 and channel not in channels:
+			return ()
 
-	if channel not in storage['Messages']:
-		storage['Messages'][ channel ] = []
+		if channel not in storage['Messages']:
+			storage['Messages'][ channel ] = []
 
-	if channel not in storage['Parts']:
-		storage['Parts'][ channel ] = {}
+		if channel not in storage['Parts']:
+			storage['Parts'][ channel ] = {}
 
 	class HistoryData:
 		"""Deal with history storage and retrieval"""
@@ -25,7 +26,7 @@ def hookCode ( server, data, storage ):
 		def pubmsg ( storage, data ):
 			"""Store a channel message"""
 
-			channel = data['Channel'].lower()
+			channel = data['Channel']
 
 			if channel not in storage['Messages']:
 				storage['Messages'][ channel ] = []
@@ -44,15 +45,20 @@ def hookCode ( server, data, storage ):
 			if channel not in storage['Parts']:
 				storage['Parts'][ channel ] = {}
 
-			storage['Parts'][ channel ][ nick.lower() ] = time.time();
+			storage['Parts'][ channel ][ nick ] = time.time();
 
+		def quit ( storage, nick ):
+			"""Record a part or quit"""
+			for channel in storage['Parts']:
+				if nick in storage['Parts'][ channel ]:
+					storage['Parts'][ channel ][ nick ] = time.time();
 
 		def join ( storage, channel, nick ):
 			"""React to a join"""
 
 			partTime = 0
-			if nick.lower() in storage['Parts'][ channel ]:
-				partTime = storage['Parts'][ channel ][ nick.lower() ]
+			if nick in storage['Parts'][ channel ]:
+				partTime = storage['Parts'][ channel ][ nick ]
 
 			messages = [ m for m in storage['Messages'][ channel ] if m['Time'] >= partTime ]
 
@@ -78,13 +84,15 @@ def hookCode ( server, data, storage ):
 
 	if data['Type'] == 'PUBMSG':
 		if data['Message'] == 'sharedump':
-			HistoryData.dump ( storage, data['Channel'] )
+			HistoryData.dump ( storage, data['Channel'].lower() )
 		else:
 			HistoryData.pubmsg ( storage, data )
-	elif data['Type'] == 'PART' or data['Type'] == 'QUIT':
-		HistoryData.part ( storage, data['Channel'], data['User']['Nick'] )
+	elif data['Type'] == 'PART':
+		HistoryData.part ( storage, data['Channel'].lower(), data['User']['Nick'].lower() )
+	elif data['Type'] == 'QUIT':
+		HistoryData.quit ( storage, data['User']['Nick'].lower() )
 	elif data['Type'] == 'JOIN':
-		HistoryData.join ( storage, data['Channel'], data['User']['Nick'] )
+		HistoryData.join ( storage, data['Channel'].lower(), data['User']['Nick'].lower() )
 
 name = 'ShareHistory'
 
