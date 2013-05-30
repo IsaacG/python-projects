@@ -5,6 +5,7 @@ import os
 import re
 import socket
 import sys
+import time
 
 class Server:
 	"""IRC Server Object. Connects to a server and does the IO"""
@@ -21,6 +22,8 @@ class Server:
 		self.callbacks = {}
 		self.callbackData = {}
 		self._nickMask = re.compile ( '.+!.+@.+' )
+		self.lastSend = 0
+		self.flowSpeed = 0.05
 
 		# This one hook is integral to the workings of IRC so it's seperate
 		self.addHook ( 'PING', 'PING', ( lambda s, d, n: s.send ( 'PONG ' + d['Server'] ) ) )
@@ -189,8 +192,14 @@ class Server:
 		if not self.conn:
 			raise Exception ( 'Not connected to a server' )
 			return
+
+		now = time.time()
+		if ( now - self.lastSend ) < self.flowSpeed:
+			time.sleep ( self.flowSpeed )
+
 		print ( "> " + line )
 		line = line + '\r\n'
+		self.lastSend = time.time()
 		self.conn.sendall ( line.encode() )
 
 # ------------------------------------------
@@ -264,16 +273,19 @@ class Server:
 					self.unload ( name )
 
 	def load ( self, name ):
+		# Unload the module if it is already loaded
 		if name in sys.modules:
 			print ( "I " + name + " already loaded. Unloading it first." )
 			self.unload ( name )
 
+		# Import the module
 		try:
 			module = importlib.import_module ( name )
 		except ImportError as e:
 			print( "W " + "Failed to load module {}: {} ".format( name, e.msg ) )
 			return
 
+		# Add callback hooks
 		try:
 			for cType in module.types:
 				self.addHook ( module.name, cType, module.hookCode )
@@ -282,6 +294,16 @@ class Server:
 			print ( "W " + "Failed to load {} because it is missing values: {}".format( name, e ) )
 
 		print ( "I " + "Loaded module {} with {} hook(s) [{}]".format ( name, len ( module.types ), ", ".join ( module.types ) ) )
+
+		# Run the init code
+		try:
+			module.init( self, self.callbackData[ name ] )
+		except AttributeError as e:
+			pass
+		except Exception as e:
+			print ( "W Init code failed; {}".format ( e ) )
+			print ( "I Now unloading module [{}]".format ( name ) )
+			self.unload ( name )
 
 	def unload ( self, name ):
 		# Don't unload marked (eg core) hooks
