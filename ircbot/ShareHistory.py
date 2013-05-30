@@ -1,16 +1,13 @@
 #! /usr/bin/python
 import time
 
-def hookCode ( server, data, storage ):
-	#if data['Channel'].lower() != '#justshmoozing':
-	#	return()
+def init ( server, storage ):
+	storage['Messages'] = {}
+	storage['Parts'] = {}
+	storage['Settings'] = { "length": 100, "channels": "" }
 
-	if "initialized" not in storage:
-		storage['initialized'] = True
-		storage['Messages'] = {}
-		storage['Parts'] = {}
-		storage['Settings'] = { "length": 100, "channels": "" }
-	
+
+def hookCode ( server, data, storage ):
 	channel = data['Channel'].lower()
 	channels = storage['Settings']['channels'].lower().split( "," )
 	if len ( storage['Settings']['channels'] ) != 0 and channel not in channels:
