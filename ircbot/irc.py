@@ -126,6 +126,10 @@ class Server:
 			data['Channel'] = parts[2]
 			data['Message'] = message
 		
+		elif parts[1] == 'QUIT':
+			data['User'] = parseUser( parts[0] )
+			data['Message'] = message
+		
 		return data
 
 	def readNetworkLoop ( self ):
