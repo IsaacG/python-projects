@@ -272,7 +272,7 @@ class Server:
 				try:
 					self.callbacks[ mType ][ name ]( self, data, self.callbackData[ name ] )
 				except Exception as e:
-					print ( "W Callback fail for Type [{}] Module [{}]; {}".format ( mType, name, e ) )
+					print ( "W Callback fail for Type [{}] Module [{}]; {}".format ( mType, name, repr (e ) ) )
 					print ( "I Now unloading module [{}]".format ( name ) )
 					self.unload ( name )
 
@@ -305,7 +305,7 @@ class Server:
 		except AttributeError as e:
 			pass
 		except Exception as e:
-			print ( "W Init code failed; {}".format ( e ) )
+			print ( "W Init code failed; {}".format ( repr ( e ) ) )
 			print ( "I Now unloading module [{}]".format ( name ) )
 			self.unload ( name )
 
