@@ -4,7 +4,7 @@ import time
 def init ( server, storage ):
 	storage['Messages'] = {}
 	storage['Parts'] = {}
-	storage['Settings'] = { "length": 100, "channels": "" }
+	storage['Settings'] = { "length": "30", "channels": "" }
 
 
 def hookCode ( server, data, storage ):
@@ -37,7 +37,7 @@ def hookCode ( server, data, storage ):
 				'Body': data['Message'],
 				'Action': data['Action']
 			} )
-			while len ( storage['Messages'][ channel ] ) > storage['Settings']['length']:
+			while len ( storage['Messages'][ channel ] ) > int ( storage['Settings']['length'] ):
 				del ( storage['Messages'][ channel ][ 0 ] )
 
 		def part ( storage, channel, nick ):
