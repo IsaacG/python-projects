@@ -23,7 +23,7 @@ class Server:
 		self.callbackData = {}
 		self._nickMask = re.compile ( '.+!.+@.+' )
 		self.lastSend = 0
-		self.flowSpeed = 0.05
+		self.flowSpeed = 0.2
 
 		# This one hook is integral to the workings of IRC so it's seperate
 		self.addHook ( 'PING', 'PING', ( lambda s, d, n: s.send ( 'PONG ' + d['Server'] ) ) )
