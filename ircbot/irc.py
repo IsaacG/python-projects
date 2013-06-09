@@ -24,6 +24,7 @@ class Server:
 		self._nickMask = re.compile ( '.+!.+@.+' )
 		self.lastSend = 0
 		self.flowSpeed = 0.2
+		self.channels = {}
 
 		# This one hook is integral to the workings of IRC so it's seperate
 		self.addHook ( 'PING', 'PING', ( lambda s, d, n: s.send ( 'PONG ' + d['Server'] ) ) )
@@ -186,10 +187,16 @@ class Server:
 	def join ( self, channel ):
 		"""Join a channel"""
 		self.send ( 'JOIN :' + channel )
+		self.channels[ channel.lower() ] = 1
 
 	def msg ( self, destination, message ):
 		"""Send a PRIVMSG"""
 		self.send ( 'PRIVMSG {} :{}'.format( destination, message ) )
+
+	def part ( self, channel ):
+		"""Part a channel"""
+		self.send ( 'PART :' + channel )
+		del ( self.channels[ channel.lower() ] )
 	
 	def send ( self, line ):
 		"""Wrapper to send raw text"""
@@ -229,6 +236,11 @@ class Server:
 			if len ( parts ) == 2 and parts[0] == "nick":
 				server.send ( "NICK :{}".format ( parts[1] ) )
 
+		def partCommand ( server, data, storage ):
+			parts = data['Message'].split()
+			if len ( parts ) == 2 and parts[0] == "part" and (parts[1])[0] == "#":
+				server.part ( parts[1] )
+
 		def quitCommand ( server, data, storage ):
 			if data['Message'] == 'quiT':
 				sys.exit()
@@ -244,6 +256,7 @@ class Server:
 		self.addHook ( '_Join', 'PRIVMSG', joinCommand )
 		self.addHook ( '_Load', 'PRIVMSG', loadCommand )
 		self.addHook ( '_Nick', 'PRIVMSG', nickCommand )
+		self.addHook ( '_Part', 'PRIVMSG', partCommand )
 		self.addHook ( '_Quit', 'PRIVMSG', quitCommand )
 		self.addHook ( '_Say', 'PRIVMSG', sayCommand )
 
