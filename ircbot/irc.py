@@ -36,7 +36,12 @@ class Server:
 
 		self.send ( 'NICK ' + self.nick )
 		self.send ( 'USER {} * 0 :{}'.format( self.nick, self.nick ) )
-		self.readNetworkLoop ( )
+		while True:
+			try:
+				self.readNetworkLoop ( )
+			except Exception as e:
+				self.conn = socket.create_connection ( ( self.server, self.port ), self.timeout )
+			
 
 	def parseLine ( self, line ):
 		"""The IRC input parser; turn a raw IRC line into a dict of data"""
@@ -76,6 +81,8 @@ class Server:
 		# The dictionary is different for every message type
 		if parts[0] == 'PING':
 			data = { 'Type': 'PING', 'Server': message }
+		elif parts[0] == 'ERROR':
+			raise Exception ( "IRC Error" )
 
 		# PRIVMSG is used for a lot of things; this gets a lot of parsing and details in the data structure
 		elif parts[1] == 'PRIVMSG':
