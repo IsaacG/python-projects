@@ -5,7 +5,7 @@
 
 def hookCode ( server, data, storage ):
 	parts = data['Message'].split()
-	if parts[0] != 'set':
+	if len ( parts ) == 0 or parts[0] != 'set':
 		return()
 
 	callbackData = server.callbackData
