@@ -14,7 +14,7 @@ class Server:
 # Basic functionality
 # ------------------------------------------
 
-	def __init__ ( self, server = 'localhost' , port = 6667, nick = 'your_nick' ):
+	def __init__ ( self, server = 'localhost' , port = 6667, nick = 'your_nick', conf = '' ):
 		self.server = server
 		self.port = port
 		self.timeout = 600
@@ -25,6 +25,8 @@ class Server:
 		self.lastSend = 0
 		self.flowSpeed = 0.2
 		self.channels = {}
+		self.conf = conf
+		self.confLoaded = False
 
 		# This one hook is integral to the workings of IRC so it's seperate
 		self.addHook ( 'PING', 'PING', ( lambda s, d, n: s.send ( 'PONG ' + d['Server'] ) ) )
@@ -33,15 +35,25 @@ class Server:
 		"""Connect to the IRC network and do the handshake then start spin reading input"""
 		conn = socket.create_connection ( ( self.server, self.port ), self.timeout )
 		self.conn = conn
+		self.connectTime = time.time()
 
 		self.send ( 'NICK ' + self.nick )
 		self.send ( 'USER {} * 0 :{}'.format( self.nick, self.nick ) )
+
 		while True:
 			try:
 				self.readNetworkLoop ( )
 			except Exception as e:
 				self.conn = socket.create_connection ( ( self.server, self.port ), self.timeout )
 			
+	def loadConfig ( self ):
+		if self.conf and not self.confLoaded:
+			self.confLoaded = True
+			with open ( self.conf ) as fh:
+				for line in fh:
+					print ( "-- Config line: " + line.rstrip() )
+					data = self.parseLine ( line.rstrip() )
+					self.dispatch ( data )
 
 	def parseLine ( self, line ):
 		"""The IRC input parser; turn a raw IRC line into a dict of data"""
@@ -83,6 +95,10 @@ class Server:
 			data = { 'Type': 'PING', 'Server': message }
 		elif parts[0] == 'ERROR':
 			raise Exception ( "IRC Error" )
+
+		elif parts[1] == 'MODE':
+			if parts[0] == self.nick and parts[2] == self.nick:
+				self.loadConfig()
 
 		# PRIVMSG is used for a lot of things; this gets a lot of parsing and details in the data structure
 		elif parts[1] == 'PRIVMSG':
@@ -169,7 +185,6 @@ class Server:
 						print ( out.encode() )
 
 					data = self.parseLine ( line )
-
 					self.dispatch ( data )
 
 				else:
@@ -346,6 +361,8 @@ def main ():
 	# Create a Server object
 	if len ( sys.argv ) == 4:
 		local = Server ( sys.argv[1], int ( sys.argv[2] ), sys.argv[3] )
+	if len ( sys.argv ) == 5:
+		local = Server ( sys.argv[1], int ( sys.argv[2] ), sys.argv[3], sys.argv[4] )
 	elif len ( sys.argv ) == 2 and sys.argv[1] == "-t":
 		local = Server ( 'localhost', 6668, 'bot' )
 	else:
