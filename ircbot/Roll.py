@@ -4,7 +4,7 @@ import random
 
 random.seed()
 
-def hookCode ( server, data ):
+def hookCode ( server, data, storage ):
 	parts = data['Message'].split()
 	if parts[0] == '.roll':
 		if len ( parts ) == 1:
