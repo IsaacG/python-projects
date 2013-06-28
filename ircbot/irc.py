@@ -361,7 +361,7 @@ def main ():
 	# Create a Server object
 	if len ( sys.argv ) == 4:
 		local = Server ( sys.argv[1], int ( sys.argv[2] ), sys.argv[3] )
-	if len ( sys.argv ) == 5:
+	elif len ( sys.argv ) == 5:
 		local = Server ( sys.argv[1], int ( sys.argv[2] ), sys.argv[3], sys.argv[4] )
 	elif len ( sys.argv ) == 2 and sys.argv[1] == "-t":
 		local = Server ( 'localhost', 6668, 'bot' )
