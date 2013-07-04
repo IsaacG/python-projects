@@ -45,6 +45,8 @@ class Server:
 				self.readNetworkLoop ( )
 			except Exception as e:
 				self.conn = socket.create_connection ( ( self.server, self.port ), self.timeout )
+				self.send ( 'NICK ' + self.nick )
+				self.send ( 'USER {} * 0 :{}'.format( self.nick, self.nick ) )
 			
 	def loadConfig ( self ):
 		if self.conf and not self.confLoaded:
@@ -321,6 +323,9 @@ class Server:
 		try:
 			module = importlib.import_module ( name )
 		except ImportError as e:
+			print( "W " + "Failed to load module {}: {} ".format( name, e.msg ) )
+			return
+		except SyntaxError as e:
 			print( "W " + "Failed to load module {}: {} ".format( name, e.msg ) )
 			return
 
