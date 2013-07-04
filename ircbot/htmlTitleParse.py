@@ -37,17 +37,20 @@ def getTitle ( url ):
 		if response.info().get_content_type() != 'text/html':
 			return "Content type: " + response.info().get_content_type()
 
-		if response.info().get_content_charset():
-			content = response.read().decode ( response.info().get_content_charset() )
-		else:
-			try:
+		try:
+			if response.info().get_content_charset():
+				content = response.read().decode ( response.info().get_content_charset() )
+			else:
 				content = response.read().decode ( 'iso-8859-1' )
-			except Exception:
-				return "Unable to parse the website"
+		except Exception:
+			return "Unable to parse the website"
 
 		parser = TitleParser ( strict = False )
 		parser.feed ( content )
-		return ( parser.title )
+
+		title = parser.title.strip().translate( { "\n": " " } )
+
+		return ( title )
 	else:
 		return "Error. Got HTTP code " + str ( response.getcode() )
 
