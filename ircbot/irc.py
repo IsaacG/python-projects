@@ -40,13 +40,7 @@ class Server:
 		self.send ( 'NICK ' + self.nick )
 		self.send ( 'USER {} * 0 :{}'.format( self.nick, self.nick ) )
 
-		while True:
-			try:
-				self.readNetworkLoop ( )
-			except Exception as e:
-				self.conn = socket.create_connection ( ( self.server, self.port ), self.timeout )
-				self.send ( 'NICK ' + self.nick )
-				self.send ( 'USER {} * 0 :{}'.format( self.nick, self.nick ) )
+		self.readNetworkLoop ( )
 			
 	def loadConfig ( self ):
 		if self.conf and not self.confLoaded:
@@ -365,19 +359,24 @@ def main ():
 	"""Run the IRC bot"""
 	# Create a Server object
 	if len ( sys.argv ) == 4:
-		local = Server ( sys.argv[1], int ( sys.argv[2] ), sys.argv[3] )
+		server = Server ( sys.argv[1], int ( sys.argv[2] ), sys.argv[3] )
 	elif len ( sys.argv ) == 5:
-		local = Server ( sys.argv[1], int ( sys.argv[2] ), sys.argv[3], sys.argv[4] )
+		server = Server ( sys.argv[1], int ( sys.argv[2] ), sys.argv[3], sys.argv[4] )
 	elif len ( sys.argv ) == 2 and sys.argv[1] == "-t":
-		local = Server ( 'localhost', 6668, 'bot' )
+		server = Server ( 'localhost', 6668, 'bot' )
 	else:
 		print ( "Usage: " + sys.argv[0] + " host port nick" )
 		sys.exit ( 1 )
 
-	local.addBasicCommands()
+	server.addBasicCommands()
 
 	# Start running
-	local.connect ()
+	while True:
+		try:
+			server.confLoaded = False
+			server.connect ()
+		except Exception as e:
+			print ( repr ( e ) )
 
 if __name__ == "__main__":
 	main ()
