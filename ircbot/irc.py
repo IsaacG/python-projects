@@ -162,7 +162,8 @@ class Server:
 		while True:
 			# Try reading data
 			try:
-				networkIn = self.conn.recv ( 1024 ).decode()
+				rawIn = self.conn.recv ( 1024 )
+				networkIn = rawIn.decode( "utf-8", "replace" )
 			except socket.timeout as timeout:
 				continue
 			
