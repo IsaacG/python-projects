@@ -108,6 +108,7 @@ class Device:
   """SmartDevice API."""
 
   # How often to refresh data.
+  # Make sure this is less than the INTERVAL.
   MAX_STALE = timedelta(seconds=30)
   CAPS = {
     'colorTemperature': 'setColorTemperature',
@@ -189,7 +190,8 @@ class Light(Device):
 class SunTracking:
   """Track the sun, updating a light bulb accordingly."""
 
-  INTERVAL = 310
+  INTERVAL = 70  # Bigger than the MAX_STALE
+  RETRY_INTERVAL = 60
 
   def __init__(self, st: SmartThings, label: str, location: astral.LocationInfo):
     self.device = Light.from_label(st, label, ('colorTemperature', 'switchLevel'))
@@ -202,7 +204,7 @@ class SunTracking:
       	self.update()
       	time.sleep(self.INTERVAL)
       except requests.exceptions.ConnectionError:
-      	time.sleep(60)
+      	time.sleep(self.RETRY_INTERVAL)
 
   def update(self):
     self.device.set_cap('colorTemperature', self.sun.color())
