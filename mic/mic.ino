@@ -34,7 +34,11 @@ void wifiConnect () {
 
         // Connect to WPA/WPA2 network.
         status = WiFi.begin(ssid, pass);
-        delay(2000);
+
+        // Poll for 10s for connection before retrying.
+        for (int i = 0; i < 20 && WiFi.status() != WL_CONNECTED; i++) {
+            delay(500);
+        }
     }
 
     Serial.println("Connected to WiFi.");

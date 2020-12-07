@@ -90,8 +90,12 @@ class PA:
     self.muted = False
 
   def mute(self):
-    self.bt_profile('a2dp_sink')
+    # self.bt_profile('a2dp_sink')
     self.pulse.source_mute(self.usb_mic_src().index, mute=True)
+    try:
+        self.pulse.source_mute(self.bt_src().index, mute=True)
+    except AssertionError:
+        pass
     self.muted = True
 
   def toggle(self, func):
