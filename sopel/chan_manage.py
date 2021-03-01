@@ -155,7 +155,7 @@ def manager(bot):
 
 def get_channels(bot, trigger):
   m_chans = manager(bot).channels
-  parts = trigger.args[-1].lower().split()
+  parts = trigger.lower().split()
   if parts:
     channels = [p for p in parts if p in m_chans]
     if channels:
@@ -195,7 +195,7 @@ def require_word_count(minimum, maximum=None):
   def actual_decorator(function):
     @functools.wraps(function)
     def guarded(bot, trigger, *args, **kwargs):
-      parts = trigger.args[-1].split()
+      parts = trigger.split()
       words = len(parts) - 1
       if words < minimum:
         return
@@ -289,16 +289,16 @@ def bad_message(bot, trigger):
   msg = None
 
   # Check for bad words.
-  if not msg and m.bad_message(trigger.args[-1]):
-    msg = f'Banning {trigger.nick} for using bad words. Said: {trigger.args[-1]}'
+  if not msg and m.bad_message(trigger):
+    msg = f'Banning {trigger.nick} for using bad words. Said: {trigger}'
 
   # Check for a repeat pattern.
-  if not msg and REPEAT_RE.search(trigger.args[-1].lower()):
+  if not msg and REPEAT_RE.search(trigger.lower()):
     msg = f'Banning {trigger.nick} for being repetitive.'
 
   # Check for excessive highlighting.
   if not msg:
-    words = trigger.args[-1].lower().split()
+    words = trigger.lower().split()
     users = [u.lower() for u in bot.channels[trigger.sender].users]
     highlight_count = sum(w in users for w in words)
     if highlight_count > len(words) // 2 or highlight_count > 4:
@@ -330,7 +330,7 @@ def on_notice(bot, trigger):
 @require_vetted(True)
 def add_vetted(bot, trigger):
   """Add a user to the vetted list."""
-  nick = trigger.args[-1].split()[1]
+  nick = trigger.split()[1]
   manager(bot).add_vetted(nick)
   for c in manager(bot).channels:
     bot.write(('MODE', c, '+v', nick))
@@ -342,7 +342,7 @@ def add_vetted(bot, trigger):
 @require_op()
 def drop_vetted(bot, trigger):
   """Remove a user from the vetted list."""
-  nick = trigger.args[-1].split()[1]
+  nick = trigger.split()[1]
   bot.say(f'Drop +v for {nick}')
   manager(bot).drop_vetted(nick)
 
@@ -353,7 +353,7 @@ def drop_vetted(bot, trigger):
 @require_op()
 def kick(bot, trigger):
   """Kick someone from a channel."""
-  nick = trigger.args[-1].split()[1]
+  nick = trigger.split()[1]
   for c in get_channels(bot, trigger):
     bot.kick(nick, c)
 
@@ -364,7 +364,7 @@ def kick(bot, trigger):
 @require_op()
 def add_ban(bot, trigger):
   """Ban someone. Trigger a kickban and save the mask."""
-  nick = trigger.args[-1].split()[1]
+  nick = trigger.split()[1]
   print(f'Banning {nick}')
   if '!' in nick and '@' in nick:
     mask = nick
@@ -392,7 +392,7 @@ def add_ban(bot, trigger):
 @require_op()
 def unban(bot, trigger):
   """Remove a ban."""
-  nick = trigger.args[-1].lower().split()[1]
+  nick = trigger.lower().split()[1]
   if '!' in nick and '@' in nick:
     ban_mask = nick
   elif '!' not in nick and '@' not in nick:
@@ -485,7 +485,7 @@ def on_conn(bot, trigger):
 def forward_pms(bot, trigger):
   """Forward all PMs sent to the bot to the bot owner."""
   owner = bot.config.get('core', 'owner')
-  bot.say('%s: %s ' % (trigger.nick, trigger.args[-1]), destination=owner)
+  bot.say(f'{trigger.nick}: {trigger} ', destination=owner)
 
 
 @sopel.module.commands('a')
@@ -493,4 +493,5 @@ def forward_pms(bot, trigger):
 @sopel.module.require_owner()
 def a(bot, trigger):
   """Test."""
-  bot.say('Hello')
+  print(trigger)
+  bot.say(trigger)
