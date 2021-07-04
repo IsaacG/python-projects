@@ -27,6 +27,8 @@ class PA:
   def __init__(self):
     self.pulse = pulsectl.Pulse()
     self.muted = False
+    self.cycle_state = 0
+    self.cycle_f = [('BT On', self.bt_on), ('USB On', self.usb_on), ('Mute', self.mute)]
 
   def bt_profile(self, profile):
     c = self.bt_card()
@@ -98,7 +100,19 @@ class PA:
         pass
     self.muted = True
 
-  def toggle(self, func):
+  def cycle(self):
+    self.cycle_state += 1
+    msg, func = self.cycle_f[self.cycle_state % 3]
+    func()
+    return msg
+
+  def toggle(self, func=None):
+    if func is None:
+      if 'headset' in self.bt_card().profile_active.name:
+        func = self.bt_on
+      else:
+        func = self.usb_on
+
     if pa.muted:
       func()
       return "Live"
@@ -128,7 +142,13 @@ def toggle_usb():
 
 @app.route('/toggle_bt', methods=['GET'])
 def toggle_bt():
-  return pa.toggle(pa.bt_on)
+  # return pa.toggle(pa.bt_on)
+  return pa.toggle()
+
+
+@app.route('/cycle', methods=['GET'])
+def cycle():
+  return pa.cycle()
 
 
 @app.route('/', methods=['GET'])
