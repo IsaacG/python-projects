@@ -18,7 +18,9 @@ To add events to the shared calendar:
 
 import datetime
 import functools
+import json
 import pathlib
+import sys
 import time
 
 from typing import Optional
@@ -29,24 +31,16 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 
-import config
-
 # dict[str, dict[str, dict[str, str]]]
 # Calendar ID => configs {"description_tags": {tag_name: tag_val}}
 # Used to add metadata to events based on calendarId.
-CALS = config.CALS
+CALS = {}
 # Filename for credentials.json, used for API access.
 # Downloaded from Google Cloud Console.
-CREDS_FILE: str = config.CREDS_FILE
+CREDS_FILE = ""
 # Filename for token.json, stores the OAuth permissions.
 # Auto-created.
-TOKEN_FILE: str = config.TOKEN_FILE
-# Calendar name for the published calendar.
-AGG_CAL_NAME: str = config.AGG_CAL_NAME
-# Tag, used to filter shared calendars.
-SHARED_CAL_TAG: str = config.SHARED_CAL_TAG
-# Poll interval, seconds, between sync attempts.
-POLL_TIME: int = config.POLL_TIME
+TOKEN_FILE = ""
 
 
 # API permissions.
@@ -73,8 +67,7 @@ def service():
             flow = InstalledAppFlow.from_client_secrets_file(CREDS_FILE, SCOPES)
             creds = flow.run_local_server(port=0)
         # Save the credentials for the next run
-        with open(TOKEN_FILE, "w") as token:
-            token.write(creds.to_json())
+        pathlib.Path(TOKEN_FILE).write_text(creds.to_json())
 
     return build("calendar", "v3", credentials=creds)
 
@@ -262,7 +255,13 @@ class GCalAggregator:
 
 def main():
     """Entry point."""
-    GCalAggregator(AGG_CAL_NAME, SHARED_CAL_TAG).daemon(POLL_TIME)
+    global TOKEN_FILE, CREDS_FILE, CALS
+    config = json.loads(pathlib.Path(sys.argv[1]).read_text())
+    TOKEN_FILE = config["token_file"]
+    CREDS_FILE = config["creds_file"]
+    CALS = config["cals"]
+    gca = GCalAggregator(config["agg_cal_name"], config["shared_cal_tag"])
+    gca.daemon(config["poll_time"])
 
 
 if __name__ == "__main__":

@@ -1,0 +1,12 @@
+{
+  "cals": {
+    "abc123@group.calendar.google.com": {
+      "source": "Sesame St"
+    }
+  },
+  "token_file": "token.json",
+  "creds_file": "credentials.json",
+  "agg_cal_name": "Aggregated Events",
+  "shared_cal_tag": "SomeName",
+  "poll_time": 1800
+}
