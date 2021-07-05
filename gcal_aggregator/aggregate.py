@@ -20,6 +20,7 @@ import datetime
 import functools
 import json
 import pathlib
+import pytz
 import sys
 import time
 
@@ -72,6 +73,16 @@ def service():
     return build("calendar", "v3", credentials=creds)
 
 
+def tz_name(dt: datetime.datetime) -> str:
+    common = ["America/Los_Angeles", "America/New_York"] + pytz.common_timezones
+    offset = dt.utcoffset()
+    now = datetime.datetime.now()
+    for tz in common:
+        if pytz.timezone(tz).utcoffset(now) == offset:
+            return tz
+    raise RuntimeError("TZ not found for", dt)
+
+
 class Event(dict):
     """Google Calendar Event wrapper."""
 
@@ -113,7 +124,8 @@ class Event(dict):
         # Convert datetime back to a string.
         for time_s in ("start", "end"):
             if f"{time_s}_dt" in body:
-                body[time_s] = {"dateTime": body[f"{time_s}_dt"].isoformat()}
+                dt = body[f"{time_s}_dt"]
+                body[time_s] = {"dateTime": dt.isoformat(), "timeZone": tz_name(dt)}
                 del body[f"{time_s}_dt"]
         service().events().insert(calendarId=dest_cal["id"], body=body).execute()
 
