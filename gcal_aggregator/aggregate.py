@@ -229,13 +229,14 @@ class GCalAggregator:
         self.dst_cals: set[Calendar] = set()
 
     def validate_config(self):
+        """Validate the calendar names in the config."""
         want_destinations: set[str] = set()
         for src in self.config["sources"].values():
             want_destinations.update(src["destinations"])
         have_destinations = set(dst["name"] for dst in self.config["destinations"].values())
-        if (missing_destinations := want_destinations - have_destinations):
+        if missing_destinations := want_destinations - have_destinations:
             raise ValueError(f"validate_config: {missing_destinations=}")
-        if (unused_destinations := have_destinations - want_destinations):
+        if unused_destinations := have_destinations - want_destinations:
             raise ValueError(f"validate_config: {unused_destinations=}")
 
     def load_calendars(self):
@@ -320,10 +321,13 @@ class AggApp:
     async def webhook(self, request: aiohttp.web.Request) -> aiohttp.web.Response:
         """Handle HTTP requests."""
         expected_headers = (
-            "X-Goog-Channel-ID", "X-Goog-Resource-ID", "X-Goog-Resource-State", "X-Goog-Channel-Token"
+            "X-Goog-Channel-ID", "X-Goog-Resource-ID",
+            "X-Goog-Resource-State", "X-Goog-Channel-Token",
         )
         has_headers = all(h in request.headers for h in expected_headers)
-        print(f"Income request: {request.scheme.upper()} {request.method} {request.host}. {has_headers=}")
+        msg = f"Income request: {request.scheme.upper()} {request.method} {request.host}."
+        msg += f"{has_headers=}"
+        print(msg)
         if not has_headers:
             return aiohttp.web.Response(text="NACK")
         if request.headers.get("X-Goog-Resource-State", None) == "sync":
