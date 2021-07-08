@@ -147,24 +147,11 @@ class Calendar:
         self.watch_token = None
 
     @property
-    def tags(self):
-        """Return tag pairs."""
-        tags = []
-        for line in self.calendar.get("description", "").splitlines():
-            if ":" not in line:
-                continue
-            key, val = line.strip().split(":", 1)
-            tags.append((key.strip(), val.strip()))
-        return tags
-
-    def get_tags(self, tag) -> list[str]:
-        """Return tag values for a tag name."""
-        return [val for key, val in self.tags if key == tag]
-
-    @property
-    def destination(self) -> list[str]:
+    def destinations(self) -> list[str]:
         """"Return where events from this calendar should be published."""
-        return self.get_tags("Publish")
+        dest_names = self.config["sources"][self.id]["destinations"]
+        dest_ids = [k for k, v in self.config["destinations"].items() if v["name"] in dest_names]
+        return dest_ids
 
     @property
     def name(self) -> str:
@@ -190,12 +177,8 @@ class Calendar:
             addition = ""
             max_results = 250
         else:
-            sources = self.get_tags("Source")
-            if sources:
-                source = sources[0]
-            else:
-                source = self.config["cals"][self.id].get("source", "MISSING")
-            addition = f"Source: {source}"
+            source_tag = self.config["sources"][self.id]["tag"]
+            addition = f"Source: {source_tag}"
             max_results = self.config["max_results"]
 
         now = datetime.datetime.utcnow().isoformat() + "Z" # "Z" indicates UTC time
@@ -217,7 +200,8 @@ class Calendar:
             "id": str(uuid.uuid4()),
         }
         self.watch_token = service().events().watch(calendarId=self.id, body=body).execute()
-        print("Requested watch for", self.id, "ID", body["id"])
+        nick = self.config["sources"][self.id]["name"]
+        print(f"Requested watch for {nick} ({self.id} {body['id']})")
 
     def watch_stop(self):
         """Remove a calendar watch."""
@@ -225,7 +209,8 @@ class Calendar:
             print("Not watching")
             return
         service().channels().stop(body=self.watch_token).execute()
-        print("Requested stop for", self.id)
+        nick = self.config["sources"][self.id]["name"]
+        print(f"Requested stop for {nick} ({self.id} {self.watch_token['id']})")
         self.watch_token = None
 
 
@@ -234,13 +219,24 @@ class GCalAggregator:
 
     def __init__(self, config) -> None:
         """Initialize an Aggregator."""
-        self.default_dest = config["default_dest"]
         self.delete_old = False
         self.config = config
+        self.validate_config()
+
         self.events: dict[Calendar, list[Event]] = {}
         self.dst_src: dict[Calendar, list[Calendar]] = {}
         self.src_cals: set[Calendar] = set()
         self.dst_cals: set[Calendar] = set()
+
+    def validate_config(self):
+        want_destinations: set[str] = set()
+        for src in self.config["sources"].values():
+            want_destinations.update(src["destinations"])
+        have_destinations = set(dst["name"] for dst in self.config["destinations"].values())
+        if (missing_destinations := want_destinations - have_destinations):
+            raise ValueError(f"validate_config: {missing_destinations=}")
+        if (unused_destinations := have_destinations - want_destinations):
+            raise ValueError(f"validate_config: {unused_destinations=}")
 
     def load_calendars(self):
         """Load calendar lists and managed calendar events."""
@@ -263,32 +259,26 @@ class GCalAggregator:
         """Return a mapping of destination calendar to all sources for it."""
         resp = service().calendarList().list(showHidden=True).execute()
         calendars = [Calendar(c, self.config) for c in resp["items"]]
+
         own_cals = [c for c in calendars if c.is_owner]
+        dst_cals = [c for c in own_cals if c.id in self.config["destinations"]]
+
+        found_dsts = [c.id for c in dst_cals]
+        if (missing_dsts := [cid for cid in self.config["destinations"] if cid not in found_dsts]):
+            print(f"get_cals: {missing_dsts=}")
+
         other_cals = [c for c in calendars if not c.is_owner]
-        # Calendars that are the source of events to publish.
-        source_cals: set[Calendar] = set()
-        source_cals.update(c for c in other_cals if self.config["search"] in c.name)
-        source_cals.update(c for c in other_cals if c.destination)
+        src_cals = [c for c in other_cals if c.id in self.config["sources"]]
 
-        want_destinations = {self.default_dest}
-        for src in source_cals:
-            want_destinations.update(src.destination)
-        have_destinations = {c.name for c in own_cals}
-        if want_destinations - have_destinations:
-            print("Wanted destination that do not exist:", want_destinations - have_destinations)
+        found_srcs = [c.id for c in src_cals]
+        if (missing_srcs := [cid for cid in self.config["sources"] if cid not in found_srcs]):
+            print(f"get_cals: {missing_srcs=}")
 
-        # Map publication outputs to a list of their inputs.
-        dst_src: dict[Calendar, list[Calendar]] = {}
-        for dst in own_cals:
-            if dst.name not in want_destinations:
-                print("Skip own cal, not in use:", dst.name)
-                continue
-            dst_src[dst] = []
-            for src in source_cals:
-                if dst.name in src.destination or (
-                    dst.name == self.default_dest and not src.destination
-                ):
-                    dst_src[dst].append(src)
+        # Map destination calendars to their source calendars.
+        dst_src = {
+            dst: [src for src in src_cals if dst.id in src.destinations]
+            for dst in dst_cals
+        }
 
         return dst_src
 
@@ -329,11 +319,13 @@ class AggApp:
 
     async def webhook(self, request: aiohttp.web.Request) -> aiohttp.web.Response:
         """Handle HTTP requests."""
-        print(request.scheme, request.method, request.host)
-        print({
-            "id": request.headers.get("X-Goog-Channel-ID", None),
-            "resourceId": request.headers.get("X-Goog-Resource-ID", None)
-        })
+        expected_headers = (
+            "X-Goog-Channel-ID", "X-Goog-Resource-ID", "X-Goog-Resource-State", "X-Goog-Channel-Token"
+        )
+        has_headers = all(h in request.headers for h in expected_headers)
+        print(f"Income request: {request.scheme.upper()} {request.method} {request.host}. {has_headers=}")
+        if not has_headers:
+            return aiohttp.web.Response(text="NACK")
         if request.headers.get("X-Goog-Resource-State", None) == "sync":
             print("Watching events for", request.headers.get("X-Goog-Channel-Token", None))
         if request.headers.get("X-Goog-Resource-State", None) == "exists":
@@ -377,8 +369,8 @@ class AggApp:
         """Run the aplication."""
         app = aiohttp.web.Application()
         app.add_routes([
-            aiohttp.web.get('/gca', self.webhook),
-            aiohttp.web.post('/gca', self.webhook),
+            aiohttp.web.get("/gca", self.webhook),
+            aiohttp.web.post("/gca", self.webhook),
         ])
 
         gca = GCalAggregator(self.config)
@@ -389,7 +381,7 @@ class AggApp:
         app.on_startup.append(self.start_watches)
         app.on_cleanup.append(self.stop_watches)
 
-        aiohttp.web.run_app(app, host="127.0.0.1", port=5000)
+        aiohttp.web.run_app(app, host=self.config["address"], port=self.config["port"])
 
     def load_config(self, filename: str):
         """Load the config."""
@@ -424,7 +416,7 @@ class AggApp:
 
 
 @click.command()
-@click.argument('config', envvar="CONFIG", type=click.Path(exists=True))
+@click.argument("config", envvar="CONFIG", type=click.Path(exists=True))
 def main(config):
     """Entry point."""
     AggApp(config).run()
