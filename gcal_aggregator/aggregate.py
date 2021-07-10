@@ -17,11 +17,9 @@ To add events to the shared calendar:
 
 
 # TODO: Periodic full refresh and sync
-# TODO: Fix the service()
 
 import asyncio
 import datetime
-import functools
 import json
 import pathlib
 import time
@@ -35,17 +33,10 @@ import dateutil.parser
 import pytz
 import tenacity
 
-from googleapiclient.discovery import build
+from googleapiclient.discovery import build, Resource
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-
-# Filename for credentials.json, used for API access.
-# Downloaded from Google Cloud Console.
-CREDS_FILE = ""
-# Filename for token.json, stores the OAuth permissions.
-# Auto-created.
-TOKEN_FILE = ""
 
 
 # API permissions.
@@ -53,28 +44,6 @@ SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/calendar",
 ]
-
-
-@functools.cache
-def service():
-    """Return a Google Calendar Service API."""
-    creds = None
-    # The file token.json stores the user's access and refresh tokens, and is
-    # created automatically when the authorization flow completes for the first
-    # time.
-    if pathlib.Path(TOKEN_FILE).exists():
-        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
-    # If there are no (valid) credentials available, let the user log in.
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(CREDS_FILE, SCOPES)
-            creds = flow.run_local_server(port=0)
-        # Save the credentials for the next run
-        pathlib.Path(TOKEN_FILE).write_text(creds.to_json())
-
-    return build("calendar", "v3", credentials=creds)
 
 
 def tz_name(timeobj: datetime.datetime) -> str:
@@ -94,9 +63,10 @@ class Event(dict):
     # Keys used to check for eqality and reposting.
     KEYS = ("summary", "description", "location", "start_dt", "end_dt", "kind", "recurrence")
 
-    def __init__(self, data: dict, addition: Optional[str] = None):
+    def __init__(self, data: dict, service, addition: Optional[str] = None) -> None:
         """Initialize."""
         super().__init__(data)
+        self.service = service
         # Convert date strings to datetime objects for TZ-aware equality.
         for time_s in ("start", "end"):
             if self.get(time_s, {}).get("dateTime", None):
@@ -106,7 +76,7 @@ class Event(dict):
             self.setdefault("description", "")
             self["description"] += "<hr /><span>" + addition + "</span>"
 
-    def __eq__(self, other: object):
+    def __eq__(self, other: object) -> bool:
         """Return if events are equal, considering only public information."""
         msg = f"Cannot compare types {type(self)} to type {type(other)}"
         assert isinstance(other, type(self)), msg
@@ -119,12 +89,12 @@ class Event(dict):
         return True
 
     @tenacity.retry(stop=tenacity.stop_after_attempt(3), wait=tenacity.wait_fixed(5))
-    def delete(self):
+    def delete(self) -> None:
         """Delete this event from Google Calendar."""
         calendar_id = self["organizer"]["email"]
-        service().events().delete(calendarId=calendar_id, eventId=self["id"]).execute()
+        self.service.events().delete(calendarId=calendar_id, eventId=self["id"]).execute()
 
-    def add(self, dest_cal):
+    def add(self, dest_cal: "Calendar") -> None:
         """Add this event to a Google Calendar."""
         body = {key: self[key] for key in self.KEYS if key in self}
         # Convert datetime back to a string.
@@ -136,21 +106,22 @@ class Event(dict):
                     "timeZone": tz_name(timeobj)
                 }
                 del body[f"{time_s}_dt"]
-        service().events().insert(calendarId=dest_cal.id, body=body).execute()
+        self.service.events().insert(calendarId=dest_cal.cid, body=body).execute()
 
 
 class Calendar:
     """Calendar wrapper."""
 
-    def __init__(self, calendar, config) -> None:
+    def __init__(self, calendar, service, config) -> None:
         self.calendar = calendar
         self.config = config
+        self.service = service
         self.watch_token = None
 
     @property
     def destinations(self) -> list[str]:
         """"Return where events from this calendar should be published."""
-        dest_names = self.config["sources"][self.id]["destinations"]
+        dest_names = self.config["sources"][self.cid]["destinations"]
         dest_ids = [k for k, v in self.config["destinations"].items() if v["name"] in dest_names]
         return dest_ids
 
@@ -160,7 +131,7 @@ class Calendar:
         return self.calendar.get("summary", "")
 
     @property
-    def id(self) -> str:
+    def cid(self) -> str:
         """Return the calendar ID."""
         return self.calendar["id"]
 
@@ -172,55 +143,56 @@ class Calendar:
     def __hash__(self) -> int:
         return hash(self.calendar["id"])
 
-    def future_events(self):
+    def future_events(self) -> list[Event]:
         """Return future events for this calendar."""
         if self.is_owner:
             addition = ""
             max_results = 250
         else:
-            source_tag = self.config["sources"][self.id]["tag"]
+            source_tag = self.config["sources"][self.cid]["tag"]
             addition = f"Source: {source_tag}"
             max_results = self.config["max_results"]
 
         now = datetime.datetime.utcnow().isoformat() + "Z" # "Z" indicates UTC time
         end = (datetime.datetime.utcnow() + datetime.timedelta(days=60)).isoformat() + "Z"
-        response = service().events().list(
-            calendarId=self.id,
+        response = self.service.events().list(
+            calendarId=self.cid,
             timeMin=now,
             timeMax=end,
             maxResults=max_results,
         ).execute()
-        return [Event(event, addition) for event in response.get("items", [])]
+        return [Event(event, self.service, addition) for event in response.get("items", [])]
 
-    def watch(self):
+    def watch(self) -> None:
         """Add a webhook callback to watch a calendar for changes."""
         body = {
             "type": "webhook",
             "address": self.config["watch_url"],
-            "token": self.id,
+            "token": self.cid,
             "id": str(uuid.uuid4()),
         }
-        self.watch_token = service().events().watch(calendarId=self.id, body=body).execute()
-        nick = self.config["sources"][self.id]["name"]
-        print(f"Requested watch for {nick} ({self.id} {body['id']})")
+        self.watch_token = self.service.events().watch(calendarId=self.cid, body=body).execute()
+        nick = self.config["sources"][self.cid]["name"]
+        print(f"Requested watch for {nick} ({self.cid} {body['id']})")
 
-    def watch_stop(self):
+    def watch_stop(self) -> None:
         """Remove a calendar watch."""
         if self.watch_token is None:
             print("Not watching")
             return
-        service().channels().stop(body=self.watch_token).execute()
-        nick = self.config["sources"][self.id]["name"]
-        print(f"Requested stop for {nick} ({self.id} {self.watch_token['id']})")
+        self.service.channels().stop(body=self.watch_token).execute()
+        nick = self.config["sources"][self.cid]["name"]
+        print(f"Requested stop for {nick} ({self.cid} {self.watch_token['id']})")
         self.watch_token = None
 
 
 class GCalAggregator:
     """Google Calendar Aggregator."""
 
-    def __init__(self, config) -> None:
+    def __init__(self, service, config) -> None:
         """Initialize an Aggregator."""
         self.delete_old = False
+        self.service = service
         self.config = config
         self.validate_config()
 
@@ -231,7 +203,7 @@ class GCalAggregator:
 
         self.lock = asyncio.Lock()
 
-    def validate_config(self):
+    def validate_config(self) -> None:
         """Validate the calendar names in the config."""
         want_destinations: set[str] = set()
         for src in self.config["sources"].values():
@@ -242,7 +214,7 @@ class GCalAggregator:
         if unused_destinations := have_destinations - want_destinations:
             raise ValueError(f"validate_config: {unused_destinations=}")
 
-    def load_calendars(self):
+    def load_calendars(self) -> None:
         """Load calendar lists and managed calendar events."""
         self.dst_src = self.get_cals()
         self.dst_cals = set(self.dst_src.keys())
@@ -261,26 +233,26 @@ class GCalAggregator:
 
     def get_cals(self) -> dict[Calendar, list[Calendar]]:
         """Return a mapping of destination calendar to all sources for it."""
-        resp = service().calendarList().list(showHidden=True).execute()
-        calendars = [Calendar(c, self.config) for c in resp["items"]]
+        resp = self.service.calendarList().list(showHidden=True).execute()
+        calendars = [Calendar(c, self.service, self.config) for c in resp["items"]]
 
         own_cals = [c for c in calendars if c.is_owner]
-        dst_cals = [c for c in own_cals if c.id in self.config["destinations"]]
+        dst_cals = [c for c in own_cals if c.cid in self.config["destinations"]]
 
-        found_dsts = [c.id for c in dst_cals]
+        found_dsts = [c.cid for c in dst_cals]
         if (missing_dsts := [cid for cid in self.config["destinations"] if cid not in found_dsts]):
             print(f"get_cals: {missing_dsts=}")
 
         other_cals = [c for c in calendars if not c.is_owner]
-        src_cals = [c for c in other_cals if c.id in self.config["sources"]]
+        src_cals = [c for c in other_cals if c.cid in self.config["sources"]]
 
-        found_srcs = [c.id for c in src_cals]
+        found_srcs = [c.cid for c in src_cals]
         if (missing_srcs := [cid for cid in self.config["sources"] if cid not in found_srcs]):
             print(f"get_cals: {missing_srcs=}")
 
         # Map destination calendars to their source calendars.
         dst_src = {
-            dst: [src for src in src_cals if dst.id in src.destinations]
+            dst: [src for src in src_cals if dst.cid in src.destinations]
             for dst in dst_cals
         }
 
@@ -319,10 +291,10 @@ class GCalAggregator:
 class AggApp:
     """Application to manage calendars with callbacks."""
 
-    def __init__(self, config_file):
+    def __init__(self, config_file: str) -> None:
         """Initialize."""
-        self.config = AggApp.load_config(config_file)
-        self.service = service()
+        self.config = json.loads(pathlib.Path(config_file).read_text())
+        self.service = self.build_service()
 
     async def webhook(self, request: aiohttp.web.Request) -> aiohttp.web.Response:
         """Handle HTTP requests."""
@@ -344,7 +316,7 @@ class AggApp:
             print(f"=> SYNC: watching events {name=}")
         elif request.headers["X-Goog-Resource-State"] == "exists":
             gca = request.app["gca"]
-            cals = [c for c in gca.src_cals if c.id == cid]
+            cals = [c for c in gca.src_cals if c.cid == cid]
             if len(cals) != 1:
                 print("No calendar with CID", cid)
                 return aiohttp.web.Response(text="NACK")
@@ -353,7 +325,7 @@ class AggApp:
             await gca.sync_calendar(cal)
         return aiohttp.web.Response(text="ACK")
 
-    async def watch_calendars(self, app):
+    async def watch_calendars(self, app: aiohttp.web.Application) -> None:
         """Watch calendars, renewing as needed."""
         gca = app["gca"]
         for cal in gca.src_cals:
@@ -369,11 +341,11 @@ class AggApp:
                 if int(cal.watch_token["expiration"]) < time.time() + 60:
                     cal.watch()
 
-    async def start_watches(self, app):
+    async def start_watches(self, app: aiohttp.web.Application) -> None:
         """Create a watch task."""
         app["watcher"] = asyncio.create_task(self.watch_calendars(app))
 
-    async def stop_watches(self, app):
+    async def stop_watches(self, app: aiohttp.web.Application) -> None:
         """Stop all calendar watches."""
         for cal in app["gca"].src_cals:
             cal.watch_stop()
@@ -387,45 +359,35 @@ class AggApp:
             aiohttp.web.post("/gca", self.webhook),
         ])
 
-        gca = GCalAggregator(self.config)
+        gca = GCalAggregator(self.service, self.config)
         gca.load_calendars()
         gca.sync_calendars()
         app["gca"] = gca
-
+        gca.sync_calendars()
         app.on_startup.append(self.start_watches)
         app.on_cleanup.append(self.stop_watches)
 
         aiohttp.web.run_app(app, host=self.config["address"], port=self.config["port"])
 
-    @staticmethod
-    def load_config(filename: str):
-        """Load the config."""
-        global TOKEN_FILE, CREDS_FILE
-        config = json.loads(pathlib.Path(filename).read_text())
-        TOKEN_FILE = config["token_file"]
-        CREDS_FILE = config["creds_file"]
-        return config
-
-    def build_service(self):
+    def build_service(self) -> Resource:
         """Return a Google Calendar Service API."""
+        token_file = self.config["token_file"]
+        creds_file = self.config["creds_file"]
         creds = None
         # The file token.json stores the user's access and refresh tokens, and is
         # created automatically when the authorization flow completes for the first
         # time.
-        if pathlib.Path(self.config["token_file"]).exists():
-            creds = Credentials.from_authorized_user_file(
-                self.config["token_file"],
-                self.config["creds_file"],
-            )
+        if pathlib.Path(token_file).exists():
+            creds = Credentials.from_authorized_user_file(token_file, SCOPES)
         # If there are no (valid) credentials available, let the user log in.
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
-                flow = InstalledAppFlow.from_client_secrets_file(self.config["creds_file"], SCOPES)
+                flow = InstalledAppFlow.from_client_secrets_file(creds_file, SCOPES)
                 creds = flow.run_local_server(port=0)
             # Save the credentials for the next run
-            pathlib.Path(self.config["token_file"]).write_text(creds.to_json())
+            pathlib.Path(token_file).write_text(creds.to_json())
 
         return build("calendar", "v3", credentials=creds)
 
