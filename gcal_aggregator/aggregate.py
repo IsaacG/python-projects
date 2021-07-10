@@ -9,7 +9,6 @@ to a shared calendar with their account info not shared.
 To add events to the shared calendar:
 * Visit http://calendar.google.com/ on a computer.
 * Hit the + next to "Other calendars" on the left bar > Create new calendar.
-* Name it something that has the SHARED_CAL_TAG somewhere in the title.
 * Click "Create calendar" only once and wait a few seconds until it creates.
 * On the left bar under Settings, click on that calendar name you just created.
 * "Share with specific people" => the public account.
@@ -17,8 +16,8 @@ To add events to the shared calendar:
 """
 
 
-# TODO: Add retries on event add/delete
 # TODO: Periodic full refresh and sync
+# TODO: Fix the service()
 
 import asyncio
 import datetime
@@ -34,6 +33,7 @@ import aiohttp
 import click
 import dateutil.parser
 import pytz
+import tenacity
 
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -118,6 +118,7 @@ class Event(dict):
             return False
         return True
 
+    @tenacity.retry(stop=tenacity.stop_after_attempt(3), wait=tenacity.wait_fixed(5))
     def delete(self):
         """Delete this event from Google Calendar."""
         calendar_id = self["organizer"]["email"]
@@ -228,6 +229,8 @@ class GCalAggregator:
         self.src_cals: set[Calendar] = set()
         self.dst_cals: set[Calendar] = set()
 
+        self.lock = asyncio.Lock()
+
     def validate_config(self):
         """Validate the calendar names in the config."""
         want_destinations: set[str] = set()
@@ -283,14 +286,23 @@ class GCalAggregator:
 
         return dst_src
 
-    def sync_calendar(self, cal: Calendar) -> None:
+    async def sync_calendar(self, cal: Calendar) -> None:
         """Sync one calendar, refreshing its event data."""
         self.events[cal] = cal.future_events()
-        self.sync_calendars()
+        async with self.lock:
+            self.sync_calendars()
 
     def sync_calendars(self) -> None:
         """Sync events to public calendars."""
         events = self.events
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        for dst in self.dst_src:
+            for event in events[dst]:
+                if "recurrence" not in event and event["end_dt"] < now:
+                    print(f"Event {event} passed; drop from {dst.name}")
+                    self.events[dst].remove(event)
+
         for dst, srcs in self.dst_src.items():
             drop = [e for e in events[dst] if not any(e in events[src] for src in srcs)]
             add = [e for src in srcs for e in events[src] if e not in events[dst]]
@@ -303,19 +315,13 @@ class GCalAggregator:
                 self.events[dst].append(event)
                 event.add(dst)
 
-    def daemon(self, poll_time):
-        """Run in daemon/poll mode."""
-        while True:
-            self.sync_calendars()
-            time.sleep(poll_time)
-
 
 class AggApp:
     """Application to manage calendars with callbacks."""
 
     def __init__(self, config_file):
         """Initialize."""
-        self.config = self.load_config(config_file)
+        self.config = AggApp.load_config(config_file)
         self.service = service()
 
     async def webhook(self, request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -325,26 +331,26 @@ class AggApp:
             "X-Goog-Resource-State", "X-Goog-Channel-Token",
         )
         has_headers = all(h in request.headers for h in expected_headers)
-        msg = f"Income request: {request.scheme.upper()} {request.method} {request.host}."
+        msg = f"Income request: {request.scheme.upper()} {request.method} {request.host}. "
         msg += f"{has_headers=}"
         print(msg)
         if not has_headers:
             return aiohttp.web.Response(text="NACK")
-        if request.headers.get("X-Goog-Resource-State", None) == "sync":
-            print("Watching events for", request.headers.get("X-Goog-Channel-Token", None))
-        if request.headers.get("X-Goog-Resource-State", None) == "exists":
-            cid = request.headers.get("X-Goog-Channel-Token", None)
-            if not cid:
-                print("No CID!")
-                return aiohttp.web.Response(text="NACK")
+
+        cid = request.headers["X-Goog-Channel-Token"]
+        name = self.config["sources"][cid]["name"]
+
+        if request.headers["X-Goog-Resource-State"] == "sync":
+            print(f"=> SYNC: watching events {name=}")
+        elif request.headers["X-Goog-Resource-State"] == "exists":
             gca = request.app["gca"]
             cals = [c for c in gca.src_cals if c.id == cid]
             if len(cals) != 1:
                 print("No calendar with CID", cid)
                 return aiohttp.web.Response(text="NACK")
             cal = cals[0]
-            print("Event occurred; sync calendar", cal.id)
-            gca.sync_calendar(cal)
+            print(f"=> EXISTS: event updated {name=}; sync calendar.")
+            await gca.sync_calendar(cal)
         return aiohttp.web.Response(text="ACK")
 
     async def watch_calendars(self, app):
@@ -354,9 +360,13 @@ class AggApp:
             cal.watch()
         while True:
             next_expire = min(int(cal.watch_token["expiration"]) for cal in gca.src_cals)
-            await asyncio.sleep(int(next_expire / 1000 - time.time()))
+            delay = int(next_expire / 1000 - time.time())
+            # Wake up a bit before the watch expires.
+            delay = max(0, delay - 10)
+            await asyncio.sleep(delay)
             for cal in gca.src_cals:
-                if int(cal.watch_token["expiration"]) < time.time():
+                # Renew watches that expired or are about to expire.
+                if int(cal.watch_token["expiration"]) < time.time() + 60:
                     cal.watch()
 
     async def start_watches(self, app):
@@ -387,7 +397,8 @@ class AggApp:
 
         aiohttp.web.run_app(app, host=self.config["address"], port=self.config["port"])
 
-    def load_config(self, filename: str):
+    @staticmethod
+    def load_config(filename: str):
         """Load the config."""
         global TOKEN_FILE, CREDS_FILE
         config = json.loads(pathlib.Path(filename).read_text())
