@@ -294,6 +294,10 @@ class AggApp:
     def __init__(self, config_file: str) -> None:
         """Initialize."""
         self.config = json.loads(pathlib.Path(config_file).read_text())
+        token_exp = dateutil.parser.isoparse(
+            json.loads(pathlib.Path(self.config["token_file"]).read_text())["expiry"]
+        )
+        print(f"Token expires {token_exp}")
         self.service = self.build_service()
 
     async def webhook(self, request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -311,11 +315,19 @@ class AggApp:
 
         cid = request.headers["X-Goog-Channel-Token"]
         name = self.config["sources"][cid]["name"]
+        gca = request.app["gca"]
 
         if request.headers["X-Goog-Resource-State"] == "sync":
             print(f"=> SYNC: watching events {name=}")
+            c = [c for c in gca.src_cals if c.cid == cid][0]
+            if c.watch_token['id'] != request.headers["X-Goog-Channel-ID"]:
+                print("==> Uncontrolled watch channel! Unsubscribing.")
+                body = {
+                    "id": request.headers["X-Goog-Channel-ID"],
+                    "resourceId": request.headers["X-Goog-Resource-ID"],
+                }
+                self.service.channels().stop(body=self.watch_token).execute()
         elif request.headers["X-Goog-Resource-State"] == "exists":
-            gca = request.app["gca"]
             cals = [c for c in gca.src_cals if c.cid == cid]
             if len(cals) != 1:
                 print("No calendar with CID", cid)
@@ -341,6 +353,12 @@ class AggApp:
                 if int(cal.watch_token["expiration"]) < time.time() + 60:
                     cal.watch()
 
+    async def load_and_sync(self, app: aiohttp.web.Application) -> None:
+        """Load calendar data and do a sync."""
+        gca = app["gca"]
+        gca.load_calendars()
+        gca.sync_calendars()
+
     async def start_watches(self, app: aiohttp.web.Application) -> None:
         """Create a watch task."""
         app["watcher"] = asyncio.create_task(self.watch_calendars(app))
@@ -359,11 +377,8 @@ class AggApp:
             aiohttp.web.post("/gca", self.webhook),
         ])
 
-        gca = GCalAggregator(self.service, self.config)
-        gca.load_calendars()
-        gca.sync_calendars()
-        app["gca"] = gca
-        gca.sync_calendars()
+        app["gca"] = GCalAggregator(self.service, self.config)
+        app.on_startup.append(self.load_and_sync)
         app.on_startup.append(self.start_watches)
         app.on_cleanup.append(self.stop_watches)
 
