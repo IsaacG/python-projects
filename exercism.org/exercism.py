@@ -1,9 +1,11 @@
 #!/usr/bin/python3
 
 # Standard lib
+import collections
 import json
 import os
 import pathlib
+import tenacity
 import time
 from typing import Any, Callable
 
@@ -30,9 +32,19 @@ class Exercism:
         self.session = requests.Session()
         self.session.headers.update({"Authorization": f"Bearer {token}"})
 
+    @tenacity.retry(
+        stop=tenacity.stop_after_attempt(3),
+        wait=tenacity.wait_exponential(multiplier=2, min=15, max=60),
+        retry=tenacity.retry_if_exception_type((requests.HTTPError, requests.exceptions.ConnectionError)),
+    )
+    def get_json_with_retries(self, *args, **kwargs) -> object:
+        resp = self.session.get(*args, **kwargs)
+        resp.raise_for_status()
+        return resp.json()
+
     def notifications(self) -> Notifications:
         """Return notifications."""
-        return self.session.get(f"{self.API}/notifications").json()
+        return self.get_json_with_retries(f"{self.API}/notifications")
 
     def print_unread_notifications(self):
         """Pretty print unread notifications."""
@@ -54,6 +66,16 @@ class Exercism:
             for result in unseen:
                 callback(result)
             seen_notifications.update(r["uuid"] for r in unseen)
+
+    def mentor_requests(self, track: str):
+        params = {"track_slug": track.lower()}
+        all_requests = collections.defaultdict(list)
+        page_count = self.get_json_with_retries(f"{self.API}/mentoring/requests", params=params)["meta"]["total_pages"]
+        for page in range(1, page_count + 1):
+            params["page"] = str(page)
+            for result in self.get_json_with_retries(f"{self.API}/mentoring/requests", params=params)["results"]:
+                all_requests[result["exercise_title"]].append(result)
+        return all_requests
 
 
 if __name__ == "__main__":
