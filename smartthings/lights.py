@@ -212,7 +212,7 @@ class SunTracking:
 
 
 def main():
-  logging.basicConfig(level=logging.INFO)
+  logging.basicConfig(level=logging.WARNING)
   token = FILE.read_text().strip()
   st = SmartThings(token)
   house = astral.LocationInfo('location', 'region', TZ, 37.2522887, -121.8967216)
