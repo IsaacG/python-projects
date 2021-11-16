@@ -61,7 +61,10 @@ class Exercism:
         seen_notifications = set(r["uuid"] for r in self.notifications()["results"])
         while True:
             time.sleep(self.WATCHER_SLEEP_SEC)
-            unread = [r for r in self.notifications()["results"] if not r["is_read"]]
+            try:
+                unread = [r for r in self.notifications()["results"] if not r["is_read"]]
+            except requests.exceptions.HTTPError:
+                continue
             unseen = [r for r in unread if r["uuid"] not in seen_notifications]
             for result in unseen:
                 callback(result)
