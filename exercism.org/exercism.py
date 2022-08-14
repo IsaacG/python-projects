@@ -74,6 +74,14 @@ class Exercism:
                 continue
             print(f"{result['url']} {result['text']}")
 
+    def print_nonpassing_solutions(self) -> None:
+        """Print a list of exercises which are not passing."""
+        solutions = self.get_paged(f"{self.API}/solutions", {})
+        for solution in solutions:
+            if solution["published_iteration_head_tests_status"] == "passed":
+                continue
+            print(f"{solution['published_iteration_head_tests_status'].upper()}: Updated {solution['track']['slug']}/{solution['exercise']['slug']}")
+
     def update_exercises(self) -> list[dict]:
         """Refresh the exercises on a track."""
         updates = []
@@ -88,12 +96,13 @@ class Exercism:
         return updates
 
     def update_exercises_and_print(self) -> None:
+        """Update stale exerises and print new states."""
         updates = self.update_exercises()
-        tests = [(lambda x: x == "passed"), (lambda x: x == "failed"),  (lambda x: x not in ("passed", "failed"))]
-        for test in tests:
+        states = {update["published_iteration_head_tests_status"] for update in updates}
+        for state in sorted(states):
             for update in updates:
-                if test(update["published_iteration_head_tests_status"]):
-                    print(f"{update['published_iteration_head_tests_status'].upper()}: Updated {update['track']['slug']}/{update['exercise']['slug']}")
+                if update["published_iteration_head_tests_status"] == state:
+                    print(f"{state.upper()}: Updated {update['track']['slug']}/{update['exercise']['slug']}")
 
     def notification_pusher(self, callback: Callable[[dict[str, str]], None]) -> None:
         """Watch for new notifications and call `callback` with them."""
