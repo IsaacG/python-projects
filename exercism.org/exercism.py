@@ -34,16 +34,17 @@ class Exercism:
         self.session = requests.Session()
         self.session.headers.update({"Authorization": f"Bearer {token}"})
 
-    def request(self, func, *args, **kwargs) -> requests.Response:
+    def request(self, func, *args, sleep=0.5, **kwargs) -> requests.Response:
         resp = func(*args, **kwargs)
         if "retry-after" in resp.headers:
             delay = int(resp.headers["retry-after"])
-            print(f"Rate limited. Sleep {delay} and retry.")
+            logging.info(f"Rate limited. Sleep {delay} and retry.")
             time.sleep(delay + 1)
             resp = func(*args, **kwargs)
 
         resp.raise_for_status()
-        time.sleep(kwargs["sleep"])
+        time.sleep(sleep)
+        return resp
 
     @tenacity.retry(
         stop=tenacity.stop_after_attempt(3),
@@ -57,6 +58,9 @@ class Exercism:
     def post(self, *args, sleep=0.5, **kwargs) -> object:
         return self.request(self.session.post, *args, sleep=sleep, **kwargs)
 
+    def patch(self, *args, sleep=0.5, **kwargs) -> object:
+        return self.request(self.session.patch, *args, sleep=sleep, **kwargs)
+
     def notifications(self) -> Notifications:
         """Return notifications."""
         return self.get_json_with_retries(f"{self.API}/notifications")
@@ -69,6 +73,27 @@ class Exercism:
             if result["is_read"]:
                 continue
             print(f"{result['url']} {result['text']}")
+
+    def update_exercises(self) -> list[dict]:
+        """Refresh the exercises on a track."""
+        updates = []
+        solutions = self.get_paged(f"{self.API}/solutions", {})
+        for solution in solutions:
+            if not solution["is_out_of_date"]:
+                continue
+            uuid = solution["uuid"]
+            r = self.patch(f"{self.API}/solutions/{uuid}/sync")
+            updates.append(r.json()["solution"])
+
+        return updates
+
+    def update_exercises_and_print(self) -> None:
+        updates = self.update_exercises()
+        tests = [(lambda x: x == "passed"), (lambda x: x == "failed"),  (lambda x: x not in ("passed", "failed"))]
+        for test in tests:
+            for update in updates:
+                if test(update["published_iteration_head_tests_status"]):
+                    print(f"{update['published_iteration_head_tests_status'].upper()}: Updated {update['track']['slug']}/{update['exercise']['slug']}")
 
     def notification_pusher(self, callback: Callable[[dict[str, str]], None]) -> None:
         """Watch for new notifications and call `callback` with them."""
@@ -146,6 +171,17 @@ class Exercism:
         for uuid in uuids:
             self.post(f"{self.API}/mentoring/discussions/{uuid}/posts", data={"content": msg})
 
+    def get_paged(self, url: str, params: dict[str, str]) -> list[dict]:
+        """Return JSON results of a GET, pulling all paginated data."""
+        results = []
+        resp = self.get_json_with_retries(url, params=params)
+        page_count = resp["meta"]["total_pages"]
+        results.extend(resp["results"])
+        for page in range(2, page_count + 1):
+            params["page"] = str(page)
+            results.extend(resp["results"])
+        return results
+
     def failing_solutions(self, track: None | str = None):
         """Get solutions which are not passing."""
         params = {}
@@ -179,3 +215,6 @@ if __name__ == "__main__":
     # Exercism().print_unread_notifications()
     for exercise in Exercism().failing_solutions("python"):
         print(f"https://exercism.org/tracks/{exercise['track']}/exercises/{exercise['exercise']}")
+
+
+# vim:ts=4:sw=4:expandtab
