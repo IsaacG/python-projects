@@ -174,11 +174,13 @@ class Exercism:
     def get_paged(self, url: str, params: dict[str, str]) -> list[dict]:
         """Return JSON results of a GET, pulling all paginated data."""
         results = []
+        params["page"] = "1"
         resp = self.get_json_with_retries(url, params=params)
         page_count = resp["meta"]["total_pages"]
         results.extend(resp["results"])
         for page in range(2, page_count + 1):
             params["page"] = str(page)
+            resp = self.get_json_with_retries(url, params=params)
             results.extend(resp["results"])
         return results
 
