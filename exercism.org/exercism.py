@@ -165,6 +165,11 @@ class Exercism:
                 uuids.append(uuid)
         return uuids
 
+    def finish(self, uuids: Iterable[str], msg: str = ""):
+        """Finish student discussions."""
+        for uuid in uuids:
+            self.request(self.session.patch, f"{self.API}/mentoring/discussions/{uuid}/finish", sleep=0.2)
+
     def nudge(self, uuids: Iterable[str], msg: str = ""):
         """Nudge student discussions."""
         if not msg:
@@ -176,7 +181,6 @@ class Exercism:
                 "If you are still working on this, that is great, too! "
                 "If you have any questions or what any help or tips, just let me know!"
             )
-        print(f"Nudging {len(uuids)} discussions.")
         for uuid in uuids:
             self.post(f"{self.API}/mentoring/discussions/{uuid}/posts", data={"content": msg})
 
@@ -219,13 +223,31 @@ class Exercism:
 
 def nudge():
     e = Exercism()
+    now = datetime.datetime.now()
     ids = e.old_mentor_discussions("awaiting_student", 30)
-    e.nudge(ids)
+    to_finish = []
+    to_nudge = []
+    for uuid in ids:
+        posts = e.get_json_with_retries(f"{e.API}/mentoring/discussions/{uuid}/posts")["items"]
+        first_mentor = min(p["updated_at"] for p in posts if not p['by_student'])
+        last_student = max((p["updated_at"] for p in posts if p['by_student']), default=first_mentor)
+        updated = max(first_mentor, last_student)
+        posts_since_updated = len([p for p in posts if p["updated_at"] >= updated])
+        age = now - datetime.datetime.strptime(updated, "%Y-%m-%dT%H:%M:%SZ")
+        if age.days > 300 and posts_since_updated > 5:
+            to_finish.append(uuid)
+        else:
+            to_nudge.append(uuid)
+    print(f"Conversations to finish: {len(to_finish)}")
+    print(f"Conversations to nudge: {len(to_nudge)}")
+    e.finish(to_finish)
+    e.nudge(to_nudge)
 
 if __name__ == "__main__":
+    nudge()
     # Exercism().print_unread_notifications()
-    for exercise in Exercism().failing_solutions("python"):
-        print(f"https://exercism.org/tracks/{exercise['track']}/exercises/{exercise['exercise']}")
+    # for exercise in Exercism().failing_solutions("python"):
+    #     print(f"https://exercism.org/tracks/{exercise['track']}/exercises/{exercise['exercise']}")
 
 
 # vim:ts=4:sw=4:expandtab
