@@ -3,6 +3,7 @@
 # Standard lib
 import collections
 import datetime
+import itertools
 import json
 import logging
 import os
@@ -12,6 +13,8 @@ import time
 from typing import Any, Callable, Iterable
 
 # External libs
+import dateutil.parser
+import dateutil.tz
 import requests
 
 
@@ -55,6 +58,18 @@ class Exercism:
         resp = self.request(self.session.get, *args, sleep=sleep, **kwargs)
         return resp.json()
 
+    def get_all_pages(self, *args, endpoint: str, **kwargs):
+        params = kwargs.pop("params", {})
+        all_data = []
+        url = f"{self.API}/{endpoint}"
+        for page in itertools.count(start=1):
+            params["page"] = str(page)
+            response = self.get_json_with_retries(url, *args, params=params, **kwargs)
+            all_data.extend(response["results"])
+            if response["meta"]["current_page"] >= response["meta"]["total_pages"]:
+                break
+        return all_data
+
     def post(self, *args, sleep=0.5, **kwargs) -> object:
         return self.request(self.session.post, *args, sleep=sleep, **kwargs)
 
@@ -76,7 +91,7 @@ class Exercism:
 
     def print_nonpassing_solutions(self) -> None:
         """Print a list of exercises which are not passing."""
-        solutions = self.get_paged(f"{self.API}/solutions", {})
+        solutions = self.get_all_pages(endpoint="solutions")
         for solution in solutions:
             if solution["published_iteration_head_tests_status"] == "passed":
                 continue
@@ -85,7 +100,7 @@ class Exercism:
     def update_exercises(self) -> list[dict]:
         """Refresh the exercises on a track."""
         updates = []
-        solutions = self.get_paged(f"{self.API}/solutions", {})
+        solutions = self.get_all_pages(endpoint="solutions")
         for solution in solutions:
             if not solution["is_out_of_date"]:
                 continue
@@ -119,16 +134,32 @@ class Exercism:
                 callback(result)
             seen_notifications.update(r["uuid"] for r in unseen)
 
+    def streaming_events(self, live: bool):
+        params = {}
+        if live:
+            params["live"] = True
+        all_data = self.get_all_pages(endpoint="streaming_events", params=params)
+        for i in all_data:
+            for key in ["starts_at", "ends_at"]:
+                i[key] = dateutil.parser.parse(i[key])
+        all_data.sort(key=lambda x: x["starts_at"])
+        return all_data
+
+    def future_streaming_events(self):
+        now = datetime.datetime.now(dateutil.tz.tzutc())
+        return [
+            i for i in self.streaming_events(False)
+            if i["starts_at"] >= now
+        ]
+
     def mentor_requests(self, track: str):
         """Return all mentoring requests for one track."""
         params = {"track_slug": track.lower()}
-        all_requests = collections.defaultdict(list)
-        page_count = self.get_json_with_retries(f"{self.API}/mentoring/requests", params=params)["meta"]["total_pages"]
-        for page in range(1, page_count + 1):
-            params["page"] = str(page)
-            for result in self.get_json_with_retries(f"{self.API}/mentoring/requests", params=params)["results"]:
-                all_requests[result["exercise_title"]].append(result)
-        return all_requests
+        all_requests = []
+        return self.get_all_pages(endpoint="mentoring/requests", params=params)
+
+    def all_tracks(self):
+        return [i["slug"] for i in self.get_json_with_retries(f"{self.API}/tracks")["tracks"]]
 
     def mentor_discussion_posts(self, uuid: str):
         """Return mentor discussion posts for one discussion."""
@@ -183,19 +214,6 @@ class Exercism:
             )
         for uuid in uuids:
             self.post(f"{self.API}/mentoring/discussions/{uuid}/posts", data={"content": msg})
-
-    def get_paged(self, url: str, params: dict[str, str]) -> list[dict]:
-        """Return JSON results of a GET, pulling all paginated data."""
-        results = []
-        params["page"] = "1"
-        resp = self.get_json_with_retries(url, params=params)
-        page_count = resp["meta"]["total_pages"]
-        results.extend(resp["results"])
-        for page in range(2, page_count + 1):
-            params["page"] = str(page)
-            resp = self.get_json_with_retries(url, params=params)
-            results.extend(resp["results"])
-        return results
 
     def failing_solutions(self, track: None | str = None):
         """Get solutions which are not passing."""
