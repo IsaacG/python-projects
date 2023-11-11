@@ -35,6 +35,7 @@ import dateutil.tz
 import pytz
 import tenacity
 
+import googleapiclient.errors
 from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build, Resource
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -109,11 +110,11 @@ class Event(dict):
         """Add this event to a Google Calendar."""
         # Check for existance first to avoid creating duplicates.
         if self in dest_cal.future_events():
-            print("Skipping add; event is already in the calendar.")
+            logging.info("Skipping add; event is already in the calendar.")
             return False
         now = datetime.datetime.now(datetime.timezone.utc)
         if "recurrence" not in self and "end_dt" in self and self["end_dt"] < now:
-            print("Skipping add; event already ended.")
+            logging.info("Skipping add; event already ended.")
             return False
         body = {key: self[key] for key in self.KEYS if key in self}
         # Convert datetime back to a string.
@@ -125,9 +126,10 @@ class Event(dict):
                     "timeZone": tz_name(timeobj)
                 }
                 del body[f"{time_s}_dt"]
-            else:
-                # All day events.
+            elif time_s in self:
                 body[time_s] = self[time_s]
+            else:
+                raise ValueError(f"Could not find start and end time: {self!r}")
         self.service().events().insert(calendarId=dest_cal.cid, body=body).execute()
         return True
 
@@ -140,6 +142,9 @@ class Calendar:
         self.config = config
         self.service = service
         self.watch_token = None
+
+    def __repr__(self):
+        return f"{self.calendar} => {self.destinations!r}"
 
     @property
     def destinations(self) -> list[str]:
@@ -185,7 +190,7 @@ class Calendar:
             maxResults=max_results,
         ).execute()
         # Dedupe events if needed.
-        return list({Event(event, self.service, addition) for event in response.get("items", [])})
+        return list({Event(event, self.service, addition) for event in response.get("items", []) if event["status"] != "cancelled"})
 
     def watch(self) -> None:
         """Add a webhook callback to watch a calendar for changes."""
@@ -197,17 +202,19 @@ class Calendar:
         }
         self.watch_token = self.service().events().watch(calendarId=self.cid, body=body).execute()
         nick = self.config["sources"][self.cid]["name"]
-        print(f"Requested watch for {nick} ({self.cid} {body['id']})")
-        # print(f"{self.watch_token=}")
+        logging.debug(f"Requested watch for {nick} ({self.cid} {body['id']})")
 
     def watch_stop(self) -> None:
         """Remove a calendar watch."""
         if self.watch_token is None:
-            print("Not watching")
+            logging.warning("Not watching")
             return
-        self.service().channels().stop(body=self.watch_token).execute()
+        try:
+            self.service().channels().stop(body=self.watch_token).execute()
+        except googleapiclient.errors.HttpError:
+            pass
         nick = self.config["sources"][self.cid]["name"]
-        print(f"Requested stop for {nick} ({self.cid} {self.watch_token['id']})")
+        logging.debug(f"Requested stop for {nick} ({self.cid} {self.watch_token['id']})")
         self.watch_token = None
 
 
@@ -246,7 +253,7 @@ class GCalAggregator:
         for cal in self.dst_cals:
             events = cal.future_events()
             if cal in self.events and sorted(events) != sorted(self.events[cal]):
-                print("Found discrepancies in events for", cal)
+                logging.warning("Found discrepancies in events for", cal)
             self.events[cal] = events
         src_cals = set()
         for srcs in self.dst_src.values():
@@ -266,14 +273,14 @@ class GCalAggregator:
 
         found_dsts = [c.cid for c in dst_cals]
         if (missing_dsts := [cid for cid in self.config["destinations"] if cid not in found_dsts]):
-            print(f"get_cals: {missing_dsts=}")
+            logging.warning(f"get_cals: {missing_dsts=}")
 
         # other_cals = [c for c in calendars if not c.is_owner]
         src_cals = [c for c in calendars if c.cid in self.config["sources"]]
 
         found_srcs = [c.cid for c in src_cals]
         if (missing_srcs := [cid for cid in self.config["sources"] if cid not in found_srcs]):
-            print(f"get_cals: {missing_srcs=}")
+            logging.warning(f"get_cals: {missing_srcs=}")
 
         # Map destination calendars to their source calendars.
         dst_src = {
@@ -297,18 +304,18 @@ class GCalAggregator:
         for dst in self.dst_src:
             for event in events[dst]:
                 if "recurrence" not in event and event["end_dt"] < now:
-                    print(f'Soft drop {event["summary"]} from {dst.name}')
+                    logging.info(f'Soft drop {event["summary"]} from {dst.name}')
                     self.events[dst].remove(event)
 
         for dst, srcs in self.dst_src.items():
             drop = [e for e in events[dst] if not any(e in events[src] for src in srcs)]
             add = [e for src in srcs for e in events[src] if e not in events[dst]]
             for event in drop:
-                print("Drop:", event["summary"])
+                logging.info(f'Drop: {event["summary"]}')
                 self.events[dst].remove(event)
                 event.delete()
             for event in add:
-                print("Add:", event["summary"])
+                logging.info(f'Add: {event.get("summary", None)}')
                 if event.add(dst):
                     self.events[dst].append(event)
 
@@ -335,7 +342,7 @@ class AggApp:
         has_headers = all(h in request.headers for h in expected_headers)
         msg = f"Income request: {request.scheme.upper()} {request.method} {request.host}. "
         msg += f"{has_headers=}"
-        print(msg)
+        logging.debug(msg)
         if not has_headers:
             return aiohttp.web.Response(text="NACK")
 
@@ -344,24 +351,25 @@ class AggApp:
         gca = request.app["gca"]
 
         if request.headers["X-Goog-Resource-State"] == "sync":
-            print(f"=> SYNC: watching events {name=}")
+            logging.info(f"=> SYNC: watching events {name=}")
             c = [c for c in gca.src_cals if c.cid == cid][0]
             if c.watch_token['id'] != request.headers["X-Goog-Channel-ID"]:
-                print("==> Uncontrolled watch channel! Unsubscribing.")
+                logging.warning("==> Uncontrolled watch channel! Unsubscribing.")
                 body = {
                     "id": request.headers["X-Goog-Channel-ID"],
                     "resourceId": request.headers["X-Goog-Resource-ID"],
                 }
-                print(request.headers)
-                print(body)
-                self.service().channels().stop(body=body).execute()
+                try:
+                    self.service().channels().stop(body=body).execute()
+                except googleapiclient.errors.HttpError:
+                    pass
         elif request.headers["X-Goog-Resource-State"] == "exists":
             cals = [c for c in gca.src_cals if c.cid == cid]
             if len(cals) != 1:
-                print("No calendar with CID", cid)
+                logging.warning("No calendar with CID", cid)
                 return aiohttp.web.Response(text="NACK")
             cal = cals[0]
-            print(f"=> EXISTS: event updated {name=}; sync calendar.")
+            logging.info(f"=> EXISTS: event updated {name=}; sync calendar.")
             await gca.sync_calendar(cal)
         return aiohttp.web.Response(text="ACK")
 
@@ -396,6 +404,11 @@ class AggApp:
         for cal in app["gca"].src_cals:
             cal.watch_stop()
         app["watcher"].cancel()
+
+    def once(self) -> None:
+        gca = GCalAggregator(self.service, self.config)
+        gca.load_calendars()
+        gca.sync_calendars()
 
     def run(self) -> None:
         """Run the aplication."""
@@ -442,10 +455,15 @@ class AggApp:
 
 
 @click.command()
+@click.option("--once", is_flag=True)
 @click.argument("config", envvar="CONFIG", type=click.Path(exists=True))
-def main(config):
+def main(config, once):
     """Entry point."""
-    AggApp(config).run()
+    logging.basicConfig(level=logging.INFO)
+    if once:
+        AggApp(config).once()
+    else:
+        AggApp(config).run()
 
 
 if __name__ == "__main__":
