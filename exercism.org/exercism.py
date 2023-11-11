@@ -13,11 +13,10 @@ import time
 from typing import Any, Callable, Iterable
 
 # External libs
-import dateutil.parser
-import dateutil.tz
 import requests
 
 
+logger = logging.getLogger(__name__)
 Notifications = dict[str, Any]
 
 
@@ -41,7 +40,7 @@ class Exercism:
         resp = func(*args, **kwargs)
         if "retry-after" in resp.headers:
             delay = int(resp.headers["retry-after"])
-            logging.info(f"Rate limited. Sleep {delay} and retry.")
+            logger.info(f"Rate limited. Sleep {delay} and retry.")
             time.sleep(delay + 1)
             resp = func(*args, **kwargs)
 
@@ -141,12 +140,13 @@ class Exercism:
         all_data = self.get_all_pages(endpoint="streaming_events", params=params)
         for i in all_data:
             for key in ["starts_at", "ends_at"]:
-                i[key] = dateutil.parser.parse(i[key])
+                parsed = datetime.datetime.strptime(i[key], "%Y-%m-%dT%H:%M:%S.000Z")
+                i[key] = parsed.replace(tzinfo=datetime.timezone.utc)
         all_data.sort(key=lambda x: x["starts_at"])
         return all_data
 
     def future_streaming_events(self):
-        now = datetime.datetime.now(dateutil.tz.tzutc())
+        now = datetime.datetime.now(datetime.timezone.utc)
         return [
             i for i in self.streaming_events(False)
             if i["starts_at"] >= now
@@ -178,7 +178,7 @@ class Exercism:
         cutoff = datetime.datetime.now() - delta
         uuids = []
         for page in range(1, page_count + 1):
-            logging.info(f"Fetching old discussions, page {page} of {page_count}")
+            logger.info(f"Fetching old discussions, page {page} of {page_count}")
             params["page"] = page
             resp = self.get_json_with_retries(f"{self.API}/mentoring/discussions", params=params)
             for discussion in resp["results"]:
@@ -223,7 +223,7 @@ class Exercism:
 
         solutions = []
         for page in range(1, page_count + 1):
-            logging.info(f"Fetching failing solutions, page {page} of {page_count}")
+            logger.info(f"Fetching failing solutions, page {page} of {page_count}")
             params["page"] = page
             resp = self.get_json_with_retries(f"{self.API}/solutions", params=params)
             for solution in resp["results"]:
