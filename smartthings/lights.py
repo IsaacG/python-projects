@@ -182,7 +182,7 @@ class Light(Device):
   
   def set_cap(self, cap, val):
     """Set light capability, only if the light is not off."""
-    if self.value('light') == 'off':
+    if self.value('switch') == 'off':
       return
     super().set_cap(cap, val)
 
@@ -207,8 +207,14 @@ class SunTracking:
       	time.sleep(self.RETRY_INTERVAL)
 
   def update(self):
-    self.device.set_cap('colorTemperature', self.sun.color())
-    self.device.set_cap('switchLevel', self.sun.level())
+    try:
+      self.device.set_cap('colorTemperature', self.sun.color())
+    except requests.JSONDecodeError:
+      pass
+    try:
+      self.device.set_cap('switchLevel', self.sun.level())
+    except requests.JSONDecodeError:
+      pass
 
 
 def main():
